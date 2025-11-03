@@ -2,7 +2,6 @@
 use crate::{proto, Event, EventBus, LoomError, Result};
 use async_trait::async_trait;
 use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};

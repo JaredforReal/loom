@@ -1,5 +1,5 @@
 // Model Router implementation
-use crate::{proto::Event, LoomError, Result};
+use crate::{proto::Event, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 

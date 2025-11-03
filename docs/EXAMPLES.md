@@ -47,3 +47,34 @@ sudo apt-get install -y clang libclang-dev pkg-config build-essential
 ```
 
 Then re-run the example command.
+
+## Minimal: ContextBuilder + InMemoryMemory + Echo TTS
+
+This example shows how to build a small prompt context from recent session events and then invoke a capability.
+
+Run:
+
+```bash
+cd core
+cargo run --example echo_tts_with_context
+```
+
+It will print the minimal instructions from ContextBuilder and then call `tts.echo` through the broker.
+
+## E2E: Mock LLM tool-use → ActionBroker → EventBus
+
+A minimal end-to-end loop where a mock LLM decides to call a tool, the broker executes it, and the result is published as an event.
+
+Run:
+
+```bash
+cd core
+cargo run --example e2e_tool_use
+```
+
+This will:
+- Seed a session with a couple of events
+- Build a minimal context
+- Mock LLM selects `tts.echo` with arguments
+- ActionBroker executes the tool call
+- Publish a final `action_done` event on the bus

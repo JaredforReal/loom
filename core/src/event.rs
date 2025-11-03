@@ -1,11 +1,11 @@
 // Event bus implementation
-use crate::{proto, LoomError, Result};
+use crate::Result;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 pub use crate::proto::{Event, QoSLevel};
 

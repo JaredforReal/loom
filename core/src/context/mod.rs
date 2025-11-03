@@ -1,4 +1,5 @@
 pub mod builder;
+pub mod memory;
 
 use serde::{Deserialize, Serialize};
 
