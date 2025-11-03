@@ -5,7 +5,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::path::Path;
 use tracing::info;
 
-/// 持久化存储
+/// Persistent storage using RocksDB
 pub struct Storage {
     db: DB,
 }

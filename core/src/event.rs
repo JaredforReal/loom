@@ -72,30 +72,30 @@ impl EventBus {
         Ok(())
     }
 
-    /// 发布事件到指定 topic
+    /// Publish event to topic
     pub async fn publish(&self, topic: &str, event: Event) -> Result<u64> {
         debug!("Publishing event {} to topic {}", event.id, topic);
 
-        // 更新统计
+        // Update stats
         self.update_stats(topic, |stats| {
             stats.total_published += 1;
         });
 
-        // 获取订阅者
+        // Get subscribers
         if let Some(subs) = self.subscriptions.get(topic) {
             let mut delivered = 0;
             let mut dropped = 0;
 
             for sub in subs.value() {
-                // 检查事件类型过滤
+                // Check event type filtering
                 if !sub.event_types.is_empty() && !sub.event_types.contains(&event.r#type) {
                     continue;
                 }
 
-                // 根据 QoS 级别处理
+                // Handle based on QoS level
                 match sub.qos {
                     QoSLevel::QosRealtime => {
-                        // 实时模式：尝试发送，失败则丢弃
+                        // Realtime mode: try to send, drop if fails
                         if sub.sender.try_send(event.clone()).is_ok() {
                             delivered += 1;
                         } else {
@@ -104,7 +104,7 @@ impl EventBus {
                         }
                     }
                     QoSLevel::QosBatched | QoSLevel::QosBackground => {
-                        // 批处理/后台模式：等待发送
+                        // Batch/background mode: wait to send
                         match sub.sender.send(event.clone()).await {
                             Ok(_) => delivered += 1,
                             Err(_) => {
@@ -128,7 +128,7 @@ impl EventBus {
         }
     }
 
-    /// 订阅 topic
+    /// Subscribe to topic
     pub async fn subscribe(
         &self,
         topic: String,
@@ -162,7 +162,7 @@ impl EventBus {
         Ok((subscription_id, rx))
     }
 
-    /// 取消订阅
+    /// Unsubscribe from topic
     pub async fn unsubscribe(&self, subscription_id: &str) -> Result<()> {
         for mut entry in self.subscriptions.iter_mut() {
             let topic = entry.key().clone();
@@ -177,12 +177,12 @@ impl EventBus {
         Ok(())
     }
 
-    /// 获取统计信息
+    /// Get stats
     pub fn get_stats(&self, topic: &str) -> Option<EventBusStats> {
         self.stats.get(topic).map(|s| s.clone())
     }
 
-    // 更新统计信息的辅助函数
+    // Update stats helper function
     fn update_stats<F>(&self, topic: &str, f: F)
     where
         F: FnOnce(&mut EventBusStats),
@@ -195,7 +195,7 @@ impl EventBus {
     }
 }
 
-// 辅助 trait 用于链式调用
+// Helper trait for chaining calls
 trait Apply {
     fn apply<F>(&mut self, f: F)
     where
@@ -211,7 +211,7 @@ impl<T> Apply for T {
     }
 }
 
-// UUID 简单实现（生产环境应使用 uuid crate）
+// UUID generation placeholder
 mod uuid {
     pub struct Uuid;
     impl Uuid {

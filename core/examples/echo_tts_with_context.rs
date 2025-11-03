@@ -2,9 +2,12 @@ use async_trait::async_trait;
 use loom_core::action_broker::{ActionBroker, CapabilityProvider};
 use loom_core::context::builder::{ContextBuilder, TriggerInput};
 use loom_core::context::memory::InMemoryMemory;
-use loom_core::context::TokenBudget;
 use loom_core::context::MemoryWriter;
-use loom_core::proto::{ActionCall, ActionError, ActionResult, ActionStatus, CapabilityDescriptor, Event, ProviderKind, QoSLevel};
+use loom_core::context::TokenBudget;
+use loom_core::proto::{
+    ActionCall, ActionError, ActionResult, ActionStatus, CapabilityDescriptor, Event, ProviderKind,
+    QoSLevel,
+};
 use loom_core::Result;
 use std::sync::Arc;
 
@@ -24,8 +27,11 @@ impl CapabilityProvider for EchoTts {
     async fn invoke(&self, call: ActionCall) -> Result<ActionResult> {
         let text: String = match serde_json::from_slice::<serde_json::Value>(&call.payload)
             .ok()
-            .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
-        {
+            .and_then(|v| {
+                v.get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+            }) {
             Some(s) => s,
             None => {
                 return Ok(ActionResult {
@@ -46,8 +52,7 @@ impl CapabilityProvider for EchoTts {
         Ok(ActionResult {
             id: "call_ctx_001".to_string(),
             status: ActionStatus::ActionOk as i32,
-            output: serde_json::to_vec(&serde_json::json!({"spoken": text}))
-                .unwrap_or_default(),
+            output: serde_json::to_vec(&serde_json::json!({"spoken": text})).unwrap_or_default(),
             error: None,
         })
     }
@@ -63,8 +68,28 @@ async fn main() -> Result<()> {
 
     // Append a couple of events for a session
     let session = "session_ctx_1";
-    let e1 = Event { id: "e1".into(), r#type: "intent".into(), timestamp_ms: 1, source: "ui".into(), metadata: Default::default(), payload: vec![], confidence: 1.0, tags: vec![], priority: 50 };
-    let e2 = Event { id: "e2".into(), r#type: "context".into(), timestamp_ms: 2, source: "system".into(), metadata: Default::default(), payload: vec![], confidence: 1.0, tags: vec![], priority: 50 };
+    let e1 = Event {
+        id: "e1".into(),
+        r#type: "intent".into(),
+        timestamp_ms: 1,
+        source: "ui".into(),
+        metadata: Default::default(),
+        payload: vec![],
+        confidence: 1.0,
+        tags: vec![],
+        priority: 50,
+    };
+    let e2 = Event {
+        id: "e2".into(),
+        r#type: "context".into(),
+        timestamp_ms: 2,
+        source: "system".into(),
+        metadata: Default::default(),
+        payload: vec![],
+        confidence: 1.0,
+        tags: vec![],
+        priority: 50,
+    };
     mem.append_event(session, e1).await?;
     mem.append_event(session, e2).await?;
 
@@ -97,10 +122,12 @@ async fn main() -> Result<()> {
     };
 
     let res = broker.invoke(call).await?;
-    println!("ActionResult: status={}, error={:?}, output={}",
+    println!(
+        "ActionResult: status={}, error={:?}, output={}",
         res.status,
         res.error,
-        String::from_utf8_lossy(&res.output));
+        String::from_utf8_lossy(&res.output)
+    );
 
     Ok(())
 }

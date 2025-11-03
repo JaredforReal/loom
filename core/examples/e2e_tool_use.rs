@@ -2,10 +2,13 @@ use async_trait::async_trait;
 use loom_core::action_broker::{ActionBroker, CapabilityProvider};
 use loom_core::context::builder::{ContextBuilder, TriggerInput};
 use loom_core::context::memory::InMemoryMemory;
-use loom_core::context::TokenBudget;
 use loom_core::context::MemoryWriter;
+use loom_core::context::TokenBudget;
 use loom_core::event::EventBus;
-use loom_core::proto::{ActionCall, ActionError, ActionResult, ActionStatus, CapabilityDescriptor, Event, ProviderKind, QoSLevel};
+use loom_core::proto::{
+    ActionCall, ActionError, ActionResult, ActionStatus, CapabilityDescriptor, Event, ProviderKind,
+    QoSLevel,
+};
 use loom_core::Result;
 use serde_json::json;
 use std::sync::Arc;
@@ -28,8 +31,11 @@ impl CapabilityProvider for EchoTts {
     async fn invoke(&self, call: ActionCall) -> Result<ActionResult> {
         let text: String = match serde_json::from_slice::<serde_json::Value>(&call.payload)
             .ok()
-            .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
-        {
+            .and_then(|v| {
+                v.get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+            }) {
             Some(s) => s,
             None => {
                 return Ok(ActionResult {
@@ -72,9 +78,9 @@ struct MockLlm;
 impl MockLlm {
     fn infer_with_tools(instructions: &str, tools: &[ToolSchema]) -> Result<LlmToolCall> {
         // Always choose first tool and pass instructions as text
-        let tool = tools.first().ok_or_else(|| {
-            loom_core::LoomError::AgentError("no tools available".into())
-        })?;
+        let tool = tools
+            .first()
+            .ok_or_else(|| loom_core::LoomError::AgentError("no tools available".into()))?;
         let text = if instructions.is_empty() {
             "Hello from MockLLM".to_string()
         } else {
@@ -101,8 +107,28 @@ async fn main() -> Result<()> {
 
     // Seed a couple of events
     let session = "session_e2e_1";
-    let e1 = Event { id: "e1".into(), r#type: "intent".into(), timestamp_ms: 1, source: "ui".into(), metadata: Default::default(), payload: vec![], confidence: 1.0, tags: vec![], priority: 50 };
-    let e2 = Event { id: "e2".into(), r#type: "context".into(), timestamp_ms: 2, source: "system".into(), metadata: Default::default(), payload: vec![], confidence: 1.0, tags: vec![], priority: 50 };
+    let e1 = Event {
+        id: "e1".into(),
+        r#type: "intent".into(),
+        timestamp_ms: 1,
+        source: "ui".into(),
+        metadata: Default::default(),
+        payload: vec![],
+        confidence: 1.0,
+        tags: vec![],
+        priority: 50,
+    };
+    let e2 = Event {
+        id: "e2".into(),
+        r#type: "context".into(),
+        timestamp_ms: 2,
+        source: "system".into(),
+        metadata: Default::default(),
+        payload: vec![],
+        confidence: 1.0,
+        tags: vec![],
+        priority: 50,
+    };
     mem.append_event(session, e1).await?;
     mem.append_event(session, e2).await?;
 
@@ -119,11 +145,16 @@ async fn main() -> Result<()> {
     info!("instructions = {}", pb.instructions);
 
     // Available tools for LLM
-    let tools = vec![ToolSchema { name: "tts.echo".into() }];
+    let tools = vec![ToolSchema {
+        name: "tts.echo".into(),
+    }];
 
     // Mock LLM decides to call a tool
     let tool_call = MockLlm::infer_with_tools(&pb.instructions, &tools)?;
-    info!("llm tool_call: {} {}", tool_call.name, tool_call.arguments_json);
+    info!(
+        "llm tool_call: {} {}",
+        tool_call.name, tool_call.arguments_json
+    );
 
     // Broker + provider
     let broker = ActionBroker::new();

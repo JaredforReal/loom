@@ -42,7 +42,10 @@ impl ActionBroker {
 
     /// List all registered capabilities
     pub fn list_capabilities(&self) -> Vec<CapabilityDescriptor> {
-    self.registry.iter().map(|e| e.value().descriptor()).collect()
+        self.registry
+            .iter()
+            .map(|e| e.value().descriptor())
+            .collect()
     }
 
     /// Invoke a capability by name with timeout handling
@@ -71,12 +74,13 @@ impl ActionBroker {
                 })?
         } else {
             // fallback: pick first provider matching the name (undefined order)
-            self
-                .registry
+            self.registry
                 .iter()
                 .find(|e| e.key().starts_with(&format!("{}:", cap_name)))
                 .map(|e| Arc::clone(e.value()))
-                .ok_or_else(|| LoomError::PluginError(format!("Capability not found: {}", cap_name)))?
+                .ok_or_else(|| {
+                    LoomError::PluginError(format!("Capability not found: {}", cap_name))
+                })?
         };
 
         let dur = if call.timeout_ms <= 0 {
@@ -86,7 +90,7 @@ impl ActionBroker {
         };
         debug!(target: "action_broker", capability = %cap_name, timeout_ms = dur, "Invoking capability");
 
-    let fut = provider_arc.invoke(call);
+        let fut = provider_arc.invoke(call);
         let res = match timeout(Duration::from_millis(dur as u64), fut).await {
             Ok(Ok(res)) => res,
             Ok(Err(err)) => {

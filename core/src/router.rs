@@ -76,7 +76,7 @@ impl ModelRouter {
         Ok(())
     }
 
-    /// 路由决策核心逻辑
+    /// Route event based on policy
     pub async fn route(
         &self,
         event: &Event,
@@ -84,7 +84,7 @@ impl ModelRouter {
     ) -> Result<RoutingDecision> {
         debug!("Routing event: {} type: {}", event.id, event.r#type);
 
-        // 1. 检查隐私策略
+        // 1. Check privacy policy
         let privacy_level = event
             .metadata
             .get("privacy")
@@ -107,17 +107,17 @@ impl ModelRouter {
             });
         }
 
-        // 2. 检查本地模型能力
+        // 2. Check if local model supports event type
         let local_supported = self.is_locally_supported(&event.r#type);
 
-        // 3. 模拟本地模型置信度（实际应调用本地模型）
+        // 3. Simulate local model confidence (actual call to local model should be made)
         let local_confidence = if local_supported {
             self.estimate_local_confidence(event).await?
         } else {
             0.0
         };
 
-        // 4. 根据规则决策
+        // 4. Make routing decision based on rules
         if local_supported && local_confidence >= self.policy.quality_threshold {
             return Ok(RoutingDecision {
                 route: Route::Local,

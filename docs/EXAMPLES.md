@@ -73,6 +73,7 @@ cargo run --example e2e_tool_use
 ```
 
 This will:
+
 - Seed a session with a couple of events
 - Build a minimal context
 - Mock LLM selects `tts.echo` with arguments

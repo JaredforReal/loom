@@ -1,4 +1,4 @@
-// Agent Runtime 实现
+// Agent Runtime Implementation
 use crate::{proto, Event, EventBus, LoomError, Result};
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -110,7 +110,7 @@ impl AgentRuntime {
     pub async fn shutdown(&mut self) -> Result<()> {
         info!("Agent Runtime shutting down");
 
-        // 停止所有 agents
+        // Stop all agents
         for entry in self.agents.iter() {
             entry.value().abort();
         }
@@ -119,7 +119,7 @@ impl AgentRuntime {
         Ok(())
     }
 
-    /// 创建并启动一个 Agent
+    /// Create and start an Agent
     pub async fn create_agent(
         &self,
         config: AgentConfig,
@@ -127,17 +127,17 @@ impl AgentRuntime {
     ) -> Result<String> {
         let agent_id = config.agent_id.clone();
 
-        // 为 agent 创建事件接收通道
+        // Create event receiving channel for agent
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(1000);
 
-        // 订阅事件
+        // Subscribe to events
         for topic in &config.subscribed_topics {
             let (_sub_id, mut rx) = self
                 .event_bus
                 .subscribe(topic.clone(), vec![], proto::QoSLevel::QosBatched)
                 .await?;
 
-            // 转发事件到 agent
+            // Forward events to agent
             let tx = event_tx.clone();
             tokio::spawn(async move {
                 while let Some(event) = rx.recv().await {
@@ -146,7 +146,7 @@ impl AgentRuntime {
             });
         }
 
-        // 创建并启动 agent
+        // Create and start agent
         let agent = Agent::new(config, behavior, event_rx);
         let handle = tokio::spawn(async move {
             if let Err(e) = agent.run().await {
@@ -160,7 +160,7 @@ impl AgentRuntime {
         Ok(agent_id)
     }
 
-    /// 删除 Agent
+    /// Delete an Agent
     pub async fn delete_agent(&self, agent_id: &str) -> Result<()> {
         if let Some((_, handle)) = self.agents.remove(agent_id) {
             handle.abort();
