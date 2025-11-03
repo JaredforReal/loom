@@ -105,7 +105,7 @@ loom/
 ├── core/              # Rust core runtime
 │   ├── src/           # Event bus, agents, router, plugins
 │   └── proto/         # Protobuf definitions
-├── plugins/           # Plugin examples
+├── extensions/        # Extensions (formerly plugins/)
 ├── examples/          # Demo applications
 ├── infra/             # Infrastructure (Docker, k8s)
 └── docs/              # Documentation

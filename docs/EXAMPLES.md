@@ -20,3 +20,30 @@ Locations
 
 - Minimal examples: `core/examples/`
 - End‑to‑end demos: `examples/`
+
+## Minimal: ActionBroker + Echo TTS
+
+A tiny example that registers a native capability `tts.echo` and invokes it through the ActionBroker.
+
+Run:
+
+```bash
+cd core
+cargo run --example echo_tts
+```
+
+Expected output:
+
+```
+[EchoTts] speaking: Hello Loom!
+ActionResult: status=0, error=None, output={"spoken":"Hello Loom!"}
+```
+
+If you see a build error mentioning libclang (bindgen), install the system packages (Debian/Ubuntu):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y clang libclang-dev pkg-config build-essential
+```
+
+Then re-run the example command.

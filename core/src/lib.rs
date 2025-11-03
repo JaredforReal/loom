@@ -1,7 +1,9 @@
 // Loom Core Library
 // Event-driven AI operating system runtime
 
+pub mod action_broker;
 pub mod agent;
+pub mod context;
 pub mod event;
 pub mod plugin;
 pub mod router;
@@ -9,14 +11,16 @@ pub mod storage;
 pub mod telemetry;
 
 // Export core types
+pub use action_broker::{ActionBroker, CapabilityProvider};
 pub use agent::{Agent, AgentRuntime, AgentState};
+pub use context::{builder::ContextBuilder, PromptBundle, TokenBudget};
 pub use event::{Event, EventBus, EventHandler, QoSLevel};
 pub use plugin::{Plugin, PluginManager};
 pub use router::{ModelRouter, Route, RoutingDecision};
 
 // Generated proto code
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"),concat!("/","loom.v1",".rs")));
+    include!(concat!(env!("OUT_DIR"), concat!("/", "loom.v1", ".rs")));
 }
 
 // Error types
