@@ -12,6 +12,7 @@ pub mod plugin;
 pub mod router;
 pub mod storage;
 pub mod telemetry;
+// tts now lives under audio::tts and is feature-gated
 
 // Export core types
 pub use action_broker::{ActionBroker, CapabilityProvider};
@@ -82,6 +83,17 @@ impl Loom {
                     target = "loom",
                     "Failed to initialize LLM provider from env; llm.generate not registered"
                 );
+            }
+
+            // TTS provider (best-effort); gated behind feature "tts"
+            #[cfg(feature = "tts")]
+            {
+                use crate::audio::tts::{TtsSpeakProvider, TtsSpeakProviderConfig};
+                let tts = TtsSpeakProvider::new(
+                    std::sync::Arc::clone(&event_bus),
+                    None::<TtsSpeakProviderConfig>,
+                );
+                action_broker.register_provider(SyncArc::new(tts));
             }
         }
         Ok(Self {
