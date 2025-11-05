@@ -5,11 +5,11 @@
 //!   sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
 //! Then run the example with:
 //!   cargo run -p loom-core --example mic_capture --features mic
+use crate::audio::utils::{gen_id, now_ms};
 use crate::{event::EventBus, proto::Event, LoomError, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
@@ -77,20 +77,7 @@ impl MicSource {
     }
 }
 
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-fn gen_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{:x}", nanos)
-}
+// now_ms and gen_id are provided by audio::utils
 
 struct AudioPacket {
     samples: Vec<i16>,
@@ -149,56 +136,139 @@ async fn run_capture_loop(event_bus: Arc<EventBus>, config: MicConfig) -> Result
             }
         };
 
-        let preferred_rates = [16_000u32, 48_000u32, 32_000u32, 8_000u32];
-        let mut chosen_config: Option<cpal::SupportedStreamConfig> = None;
-        for cfg_range in supported_configs {
-            if cfg_range.channels() != cfg_for_thread.channels {
-                continue;
-            }
-            let sample_format = cfg_range.sample_format();
-            for &rate in &preferred_rates {
-                if cfg_range.min_sample_rate().0 <= rate && cfg_range.max_sample_rate().0 >= rate {
-                    chosen_config = Some(cpal::SupportedStreamConfig::new(
-                        cfg_range.channels(),
-                        cpal::SampleRate(rate),
-                        cfg_range.buffer_size().clone(),
-                        sample_format,
-                    ));
-                    break;
-                }
-            }
-            if chosen_config.is_some() {
-                break;
+        // Build candidate list across supported configs, preferring:
+        // 1) Requested sample rate if available, otherwise 48k, 32k, 16k, 8k
+        // 2) Higher-quality sample formats: F32 > I16 > U16 > U8
+        // 3) Requested channel count; if unavailable, allow 2ch and downmix later
+        let preferred_rates_primary = [
+            cfg_for_thread.sample_rate_hz,
+            48_000u32,
+            32_000u32,
+            16_000u32,
+            8_000u32,
+        ];
+
+        #[derive(Clone)]
+        struct Candidate {
+            cfg: cpal::SupportedStreamConfig,
+            rate: u32,
+            channels: u16,
+            fmt: cpal::SampleFormat,
+            rate_rank: usize,
+            fmt_rank: usize,
+            ch_penalty: usize,
+        }
+
+        /// Return a relative "quality" rank for input sample formats when picking
+        /// a capture configuration.
+        ///
+        /// Why F32 > I16 > U16 > U8?
+        /// - F32 (3): Float input provides the most headroom and avoids device-side
+        ///   clipping/AGC effects. Even though our pipeline normalizes to i16 for
+        ///   events, capturing as f32 minimizes quantization, lets us clamp/scale
+        ///   deterministically, and generally yields cleaner VAD/STT inputs. The
+        ///   f32→i16 conversion cost is negligible compared to VAD/whisper.
+        /// - I16 (2): Matches our internal PCM16 pipeline and is widely supported
+        ///   with good fidelity on many devices/drivers.
+        /// - U16 (1) / U8 (0): Unsigned PCM has a DC offset and reduced effective
+        ///   dynamic range for speech. It requires re-centering and tends to come
+        ///   from lower-quality paths. We handle conversion, but prefer signed/float
+        ///   formats when available.
+        ///
+        /// Note: This ranking only influences capture selection. Regardless of the
+        /// input format, we convert to i16 samples before emitting `audio_chunk`.
+        fn fmt_rank(fmt: cpal::SampleFormat) -> usize {
+            match fmt {
+                cpal::SampleFormat::F32 => 3,
+                cpal::SampleFormat::I16 => 2,
+                cpal::SampleFormat::U16 => 1,
+                cpal::SampleFormat::U8 => 0,
+                _ => 0,
             }
         }
 
-        let chosen_config = match chosen_config {
-            Some(c) => c,
-            None => match input_device.default_input_config() {
+        let mut candidates: Vec<Candidate> = Vec::new();
+        for cfg_range in supported_configs {
+            let fmt = cfg_range.sample_format();
+            let ch = cfg_range.channels();
+            for (rank, &rate) in preferred_rates_primary.iter().enumerate() {
+                if cfg_range.min_sample_rate().0 <= rate && cfg_range.max_sample_rate().0 >= rate {
+                    let ch_penalty = if ch == cfg_for_thread.channels {
+                        0
+                    } else if ch == 2 {
+                        1
+                    } else {
+                        2
+                    };
+                    candidates.push(Candidate {
+                        cfg: cpal::SupportedStreamConfig::new(
+                            ch,
+                            cpal::SampleRate(rate),
+                            cfg_range.buffer_size().clone(),
+                            fmt,
+                        ),
+                        rate,
+                        channels: ch,
+                        fmt,
+                        rate_rank: rank,
+                        fmt_rank: fmt_rank(fmt),
+                        ch_penalty,
+                    });
+                }
+            }
+        }
+
+        // Sort by best quality: higher fmt_rank, lower ch_penalty, lower rate_rank
+        candidates.sort_by(|a, b| {
+            b.fmt_rank
+                .cmp(&a.fmt_rank)
+                .then(a.ch_penalty.cmp(&b.ch_penalty))
+                .then(a.rate_rank.cmp(&b.rate_rank))
+        });
+
+        let chosen_config = if let Some(best) = candidates.first() {
+            best.cfg.clone()
+        } else {
+            match input_device.default_input_config() {
                 Ok(c) => c,
                 Err(e) => {
                     error!("failed to get default input config: {}", e);
                     return;
                 }
-            },
+            }
         };
 
         let actual_rate = chosen_config.sample_rate().0;
         let actual_channels = chosen_config.channels();
+        let fmt = chosen_config.sample_format();
+        let fmt_str = match fmt {
+            cpal::SampleFormat::F32 => "f32",
+            cpal::SampleFormat::I16 => "i16",
+            cpal::SampleFormat::U16 => "u16",
+            cpal::SampleFormat::U8 => "u8",
+            other => {
+                warn!(
+                    "Using uncommon sample format: {:?}. Audio quality may be degraded. Consider configuring your device to use F32 or I16 format.",
+                    other
+                );
+                "other"
+            }
+        };
         if actual_rate != cfg_for_thread.sample_rate_hz
             || actual_channels != cfg_for_thread.channels
         {
             warn!(
-                "Mic using rate={}Hz channels={} (requested {}Hz/{}ch)",
+                "Mic using rate={}Hz channels={} fmt={} (requested {}Hz/{}ch)",
                 actual_rate,
                 actual_channels,
+                fmt_str,
                 cfg_for_thread.sample_rate_hz,
                 cfg_for_thread.channels
             );
         } else {
             info!(
-                "Mic configured rate={}Hz channels={} device=\"{}\"",
-                actual_rate, actual_channels, device_name
+                "Mic configured rate={}Hz channels={} device=\"{}\" fmt={}",
+                actual_rate, actual_channels, device_name, fmt_str
             );
         }
 
