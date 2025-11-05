@@ -96,6 +96,51 @@ async fn run_capture_loop(event_bus: Arc<EventBus>, config: MicConfig) -> Result
         // Choose host and input device
         let host = cpal::default_host();
 
+        // Optional: Log available input devices and their basic capabilities
+        if std::env::var("MIC_LOG_DEVICES").is_ok() {
+            match host.input_devices() {
+                Ok(devices) => {
+                    info!("Listing input devices (set MIC_DEVICE to choose by substring):");
+                    for dev in devices {
+                        match dev.name() {
+                            Ok(name) => {
+                                let mut caps = String::new();
+                                if let Ok(mut cfgs) = dev.supported_input_configs() {
+                                    // Just summarize min..max sample rates and max channels seen
+                                    let mut min_sr = u32::MAX;
+                                    let mut max_sr = 0u32;
+                                    let mut max_ch = 0u16;
+                                    while let Some(r) = cfgs.next() {
+                                        let min = r.min_sample_rate().0;
+                                        let max = r.max_sample_rate().0;
+                                        let ch = r.channels();
+                                        if min < min_sr {
+                                            min_sr = min;
+                                        }
+                                        if max > max_sr {
+                                            max_sr = max;
+                                        }
+                                        if ch > max_ch {
+                                            max_ch = ch;
+                                        }
+                                    }
+                                    if min_sr != u32::MAX {
+                                        caps = format!(
+                                            " ({}-{} Hz, up to {}ch)",
+                                            min_sr, max_sr, max_ch
+                                        );
+                                    }
+                                }
+                                info!(" • {}{}", name, caps);
+                            }
+                            Err(_) => info!(" • <unnamed device>"),
+                        }
+                    }
+                }
+                Err(e) => warn!("Failed to list input devices: {}", e),
+            }
+        }
+
         // Enumerate devices and optionally filter by name
         let input_device = if let Some(ref needle) = cfg_for_thread.device_name {
             let mut found: Option<cpal::Device> = None;

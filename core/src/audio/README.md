@@ -59,6 +59,36 @@ Transcribes speech segments to text using whisper.cpp.
 
 See [STT Guide](../../docs/STT.md) for details.
 
+### 4. Wake Word on Transcript (`wake.rs`)
+
+Lightweight wake word detection using final transcripts (no extra model).
+
+**Features**:
+
+- Listens to `transcript.final` events and matches phrases like "hey loom" or "loom"
+- Fuzzy matching via Levenshtein distance (configurable, default <= 1)
+- Publishes `wake_word_detected` with a fresh `session_id`
+- If the same utterance has remainder after the wake phrase, publishes `user.query` immediately; otherwise arms and treats the next utterance as the query
+
+**Event Input**: `transcript.final` from topic `transcript`
+
+**Event Output**:
+
+- `wake_word_detected` on topic `wake`
+- `user.query` on topic `query`
+
+Enable with feature flag `wake`.
+
+Configuration:
+
+- `WAKE_PHRASES`: Comma-separated list of phrases (default: `"hey loom,loom"`)
+- `WAKE_FUZZY_DISTANCE`: Max edit distance (default: `1`)
+- `WAKE_MIN_QUERY_CHARS`: Min chars to consider same-utterance query (default: `4`)
+- `WAKE_MATCH_ANYWHERE`: Allow matching phrases anywhere in the sentence (default: `true`)
+- `WAKE_JW_THRESHOLD`: Jaro–Winkler similarity threshold 0.0–1.0 (default: `0.90`) — higher is stricter
+- `WAKE_TOPIC`: Output topic for wake events (default: `"wake"`)
+- `QUERY_TOPIC`: Output topic for queries (default: `"query"`)
+
 ## Quick Start
 
 ### Prerequisites
@@ -179,20 +209,22 @@ All audio components use environment variables for configuration:
 
 ### Microphone
 
-- `MIC_DEVICE`: Device name substring to match (e.g., "USB")
-- `MIC_CHUNK_MS`: Chunk size in milliseconds (default: 20)
-- `MIC_TOPIC`: Event topic (default: "audio.mic")
-- `MIC_SOURCE`: Event source name (default: "mic.primary")
+- `MIC_LOG_DEVICES`: If set (e.g., `1`), log all available input devices and their supported sample-rate range and max channels to help selection (use with `MIC_DEVICE`).
+
+Notes:
+
+- The runtime logs the actual device, sample rate, channels, and sample format chosen. Use `MIC_DEVICE` to force a specific device by substring.
+- For best STT accuracy, prefer internal/USB mics over Bluetooth HFP/HSP profiles (which are narrowband and low quality).
 
 ### VAD
 
-- `VAD_MODE`: Aggressiveness 0-3 (default: 2)
-- `VAD_FRAME_MS`: Frame size 10/20/30 (default: 20)
-- `VAD_MIN_START_MS`: Min speech duration to trigger start (default: 60)
-- `VAD_HANGOVER_MS`: Delay before speech end (default: 200)
-- `VAD_INPUT_TOPIC`: Input topic (default: "audio.mic")
-- `VAD_VOICED_TOPIC`: Voiced audio topic (default: "audio.voiced")
-- `VAD_TOPIC`: VAD event topic (default: "vad")
+- `VAD_MODE`: Aggressiveness (0–3, default: `2`)
+- `VAD_FRAME_MS`: Frame size in milliseconds (one of `10`, `20`, `30`; default: `20`)
+- `VAD_MIN_START_MS`: Minimum voiced duration before emitting `vad.speech_start` (default: `60`)
+- `VAD_HANGOVER_MS`: Delay after last voiced frame before emitting `vad.speech_end` (default: `200`)
+- `VAD_INPUT_TOPIC`: Input audio chunk topic (default: `"audio.mic"`)
+- `VAD_VOICED_TOPIC`: Voiced audio topic (default: `"audio.voiced"`)
+- `VAD_TOPIC`: VAD event topic (default: `"vad"`)
 
 ### STT
 
