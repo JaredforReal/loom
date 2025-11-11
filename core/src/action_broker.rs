@@ -1,5 +1,5 @@
 use crate::proto::{ActionCall, ActionResult, ActionStatus, CapabilityDescriptor};
-use crate::{LoomError, Result};
+use crate::{Envelope, LoomError, Result};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -49,10 +49,14 @@ impl ActionBroker {
     }
 
     /// Invoke a capability by name with timeout handling
-    pub async fn invoke(&self, call: ActionCall) -> Result<ActionResult> {
+    pub async fn invoke(&self, mut call: ActionCall) -> Result<ActionResult> {
         let cap_name = call.capability.clone();
         let version = call.version.clone();
         let call_id = call.id.clone();
+
+        // Ensure envelope metadata present in headers
+        let env = Envelope::from_metadata(&call.headers, &call_id);
+        env.apply_to_action_call(&mut call);
 
         // Idempotency shortcut
         if let Some(hit) = self.cache.get(&call_id) {

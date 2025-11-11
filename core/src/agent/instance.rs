@@ -7,7 +7,7 @@ use crate::proto::{Action, AgentConfig, AgentState};
 use crate::router::{
     AgentContext, ModelRouter, PrivacyLevel, Route, RoutingDecision, RoutingPolicy,
 };
-use crate::{Event, EventBus, Result};
+use crate::{Envelope, Event, EventBus, Result};
 
 use super::behavior::AgentBehavior;
 
@@ -58,8 +58,20 @@ impl Agent {
         self.behavior.on_init(&self.config).await?;
 
         // Event loop
-        while let Some(event) = self.event_rx.recv().await {
+        while let Some(mut event) = self.event_rx.recv().await {
             debug!("Agent {} received event {}", self.config.agent_id, event.id);
+
+            // Ensure envelope metadata present; attach defaults if missing
+            let mut env = Envelope::from_event(&event);
+            if env.sender.is_empty() {
+                env.sender = format!("agent.{}", self.config.agent_id);
+            }
+            // Increment hop & ttl; drop if expired
+            if !env.next_hop() {
+                debug!("Dropping event {} due to TTL exhaustion", event.id);
+                continue;
+            }
+            env.attach_to_event(&mut event);
 
             // Snapshot state (read) for routing context
             let state_snapshot = {
@@ -68,7 +80,7 @@ impl Agent {
             };
 
             // Route the event first
-            let decision = self.route_event(&event, &state_snapshot).await;
+            let decision = self.route_event(&event, &state_snapshot, &env).await;
 
             match self.handle_with_route(event, decision).await {
                 Ok(actions) => {
@@ -97,7 +109,12 @@ impl Agent {
     }
 
     /// Determine routing for the event, log the decision, and publish an observability event
-    async fn route_event(&self, event: &Event, state: &AgentState) -> RoutingDecision {
+    async fn route_event(
+        &self,
+        event: &Event,
+        state: &AgentState,
+        env: &Envelope,
+    ) -> RoutingDecision {
         // Build optional AgentContext
         let ctx = AgentContext {
             recent_events: vec![],
@@ -154,7 +171,7 @@ impl Agent {
         );
         md.insert("est_cost".into(), format!("{:.4}", decision.estimated_cost));
 
-        let obs_evt = Event {
+        let mut obs_evt = Event {
             id: format!("evt_route_{}", chrono::Utc::now().timestamp_millis()),
             r#type: "routing_decision".to_string(),
             timestamp_ms: chrono::Utc::now().timestamp_millis(),
@@ -165,6 +182,7 @@ impl Agent {
             tags: vec!["router".into()],
             priority: 50,
         };
+        env.attach_to_event(&mut obs_evt);
         let _ = self
             .event_bus
             .publish(&format!("agent.{}", self.config.agent_id), obs_evt)
@@ -296,12 +314,13 @@ impl Agent {
 
         // Build ActionCall
         let now = chrono::Utc::now();
-        let call = ActionCall {
-            id: format!(
-                "act_{}",
-                now.timestamp_nanos_opt()
-                    .unwrap_or_else(|| now.timestamp_millis() * 1_000_000)
-            ),
+        let call_id = format!(
+            "act_{}",
+            now.timestamp_nanos_opt()
+                .unwrap_or_else(|| now.timestamp_millis() * 1_000_000)
+        );
+        let mut call = ActionCall {
+            id: call_id.clone(),
             capability: action.action_type.clone(),
             version: "".to_string(), // resolve first provider by name if version unspecified
             payload: action.payload.clone(),
@@ -311,10 +330,15 @@ impl Agent {
             qos: qos as i32,
         };
 
+        // Attach envelope into call headers
+        let mut env = Envelope::new(call_id.clone(), format!("agent.{}", self.config.agent_id));
+        env.correlation_id = call_id.clone();
+        env.apply_to_action_call(&mut call);
+
         let res = self.action_broker.invoke(call).await?;
 
         // Optionally publish result event for observability
-        let evt = Event {
+        let mut evt = Event {
             id: format!(
                 "evt_action_result_{}",
                 chrono::Utc::now().timestamp_millis()
@@ -341,6 +365,8 @@ impl Agent {
             tags: vec!["action".into()],
             priority: action.priority,
         };
+        // Reuse envelope from action call to maintain thread/correlation consistency
+        env.attach_to_event(&mut evt);
         // Best-effort publish; ignore delivery count
         let _ = self
             .event_bus
