@@ -5,6 +5,7 @@ pub mod action_broker;
 pub mod agent;
 pub mod collab; // Collaboration primitives built on EventBus + Envelope
 pub mod context;
+pub mod dashboard; // Real-time event flow visualization
 pub mod directory; // Agent & Capability directories
 pub mod envelope; // Unified metadata envelope for events/actions threads
 pub mod event;
@@ -76,6 +77,10 @@ pub struct Loom {
 
 impl Loom {
     pub async fn new() -> Result<Self> {
+        // Note: OpenTelemetry should be initialized BEFORE creating Loom
+        // by calling telemetry::init_telemetry() in your main function.
+        // This ensures the global tracing subscriber is set up correctly.
+
         let event_bus = std::sync::Arc::new(EventBus::new().await?);
         let action_broker = std::sync::Arc::new(ActionBroker::new());
         // Initialize router first so we can pass a clone to the agent runtime
@@ -136,6 +141,9 @@ impl Loom {
         self.model_router.shutdown().await?;
         self.agent_runtime.shutdown().await?;
         self.event_bus.shutdown().await?;
+
+        // Shutdown OpenTelemetry (flushes pending telemetry)
+        telemetry::shutdown_telemetry();
 
         tracing::info!("Loom shut down successfully");
         Ok(())
