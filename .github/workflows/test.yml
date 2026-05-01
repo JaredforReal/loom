@@ -11,12 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install uv
-        run: pip install uv
       - name: Install dependencies
-        run: uv pip install -e ".[dev,gmail]" --system
+        run: uv sync --locked --extra dev --extra gmail
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: uv run pytest tests/ -v
