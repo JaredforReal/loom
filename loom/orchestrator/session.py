@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -37,6 +36,7 @@ class SessionStatus(StrEnum):
 @dataclass
 class AgentStep:
     """A single step in the agent's processing log."""
+
     step: str
     input: str = ""
     output: str = ""
@@ -46,6 +46,7 @@ class AgentStep:
 @dataclass
 class Session:
     """Represents a managed Claude Code session backed by ClaudeSDKClient."""
+
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: SessionStatus = SessionStatus.IDLE
     envelope_id: str = ""
@@ -129,7 +130,8 @@ class SessionManager:
         if self.active_count >= self._max_concurrent:
             logger.warning(
                 "Max concurrent sessions (%d) reached — envelope %s queued",
-                self._max_concurrent, envelope_id,
+                self._max_concurrent,
+                envelope_id,
             )
 
         resolved_prompt = self.get_prompt_template(prompt_template)
@@ -164,6 +166,7 @@ class SessionManager:
 
         # Fire off the initial query — collect results in background
         import asyncio
+
         asyncio.create_task(self._run_session(session, task_prompt))
 
         return session
@@ -183,17 +186,21 @@ class SessionManager:
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
-                            session.steps.append(AgentStep(
-                                step="assistant",
-                                output=block.text,
-                                timestamp=datetime.utcnow().isoformat(),
-                            ))
+                            session.steps.append(
+                                AgentStep(
+                                    step="assistant",
+                                    output=block.text,
+                                    timestamp=datetime.utcnow().isoformat(),
+                                )
+                            )
                         elif isinstance(block, ToolUseBlock):
-                            session.steps.append(AgentStep(
-                                step=f"tool:{block.name}",
-                                input=str(block.input),
-                                timestamp=datetime.utcnow().isoformat(),
-                            ))
+                            session.steps.append(
+                                AgentStep(
+                                    step=f"tool:{block.name}",
+                                    input=str(block.input),
+                                    timestamp=datetime.utcnow().isoformat(),
+                                )
+                            )
 
                 elif isinstance(message, ResultMessage):
                     session.result = "\n".join(
@@ -227,6 +234,7 @@ class SessionManager:
             await session._client.query(message)
             # Re-run the response collector
             import asyncio
+
             asyncio.create_task(self._run_session(session, ""))
             return True
         except Exception as exc:

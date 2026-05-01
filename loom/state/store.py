@@ -81,7 +81,9 @@ def _envelope_to_row(env: Envelope, row: EnvelopeRow | None = None) -> EnvelopeR
     row.metadata_ = json.dumps(env.metadata)
     row.agent_summary = env.agent_summary
     row.agent_log = json.dumps(env.agent_log)
-    row.proposed_action = json.dumps(env.proposed_action) if env.proposed_action is not None else None
+    row.proposed_action = (
+        json.dumps(env.proposed_action) if env.proposed_action is not None else None
+    )
     return row
 
 
@@ -162,10 +164,12 @@ class Store:
             stmt = (
                 select(EnvelopeRow.source, func.count(EnvelopeRow.id))
                 .where(
-                    EnvelopeRow.status.in_([
-                        str(EnvelopeStatus.PENDING),
-                        str(EnvelopeStatus.WAITING_APPROVAL),
-                    ])
+                    EnvelopeRow.status.in_(
+                        [
+                            str(EnvelopeStatus.PENDING),
+                            str(EnvelopeStatus.WAITING_APPROVAL),
+                        ]
+                    )
                 )
                 .group_by(EnvelopeRow.source)
             )

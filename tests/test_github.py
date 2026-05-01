@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -18,10 +18,10 @@ from loom.adaptor.github import (
 )
 from loom.core.envelope import Envelope, EnvelopeStatus
 
-
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_issue(
     number: int = 1,
@@ -66,8 +66,14 @@ def _make_pr(
 ) -> dict[str, Any]:
     """Build a minimal GitHub PR API response dict."""
     issue = _make_issue(
-        number=number, title=title, body=body, state=state,
-        labels=labels, updated_at=updated_at, user=user, repo=repo,
+        number=number,
+        title=title,
+        body=body,
+        state=state,
+        labels=labels,
+        updated_at=updated_at,
+        user=user,
+        repo=repo,
     )
     issue["pull_request"] = {
         "url": f"https://api.github.com/repos/{repo}/pulls/{number}",
@@ -137,6 +143,7 @@ async def _teardown_client(adaptor: GitHubAdaptor) -> None:
 # ===========================================================================
 # normalize
 # ===========================================================================
+
 
 class TestNormalize:
     """Tests for GitHubAdaptor.normalize()."""
@@ -244,6 +251,7 @@ class TestNormalize:
 # Source management
 # ===========================================================================
 
+
 class TestSourceManagement:
     """Tests for add_source / remove_source / cursor persistence."""
 
@@ -296,6 +304,7 @@ class TestSourceManagement:
 # ===========================================================================
 # Polling (_poll_source)
 # ===========================================================================
+
 
 class TestPollSource:
     """Tests for _poll_source with mocked HTTP.
@@ -372,7 +381,9 @@ class TestPollSource:
         with respx.mock:
             respx.get(f"{GITHUB_API}/repos/acme/app/issues").mock(
                 return_value=httpx.Response(
-                    200, json=[], headers={"ETag": '"new-etag-456"'},
+                    200,
+                    json=[],
+                    headers={"ETag": '"new-etag-456"'},
                 ),
             )
             _setup_client(adaptor)
@@ -438,8 +449,8 @@ class TestPollSource:
 # Event type filtering
 # ===========================================================================
 
-class TestEventTypeFilter:
 
+class TestEventTypeFilter:
     @pytest.mark.asyncio
     async def test_issues_only(self):
         adaptor = _make_adaptor()
@@ -487,8 +498,8 @@ class TestEventTypeFilter:
 # Label filtering
 # ===========================================================================
 
-class TestLabelFilter:
 
+class TestLabelFilter:
     @pytest.mark.asyncio
     async def test_label_filter_matches(self):
         adaptor = _make_adaptor()
@@ -497,7 +508,9 @@ class TestLabelFilter:
         adaptor._cursors["acme/app"] = "2025-06-01T00:00:00Z"
 
         issue = _make_issue(
-            number=1, labels=[{"name": "bug"}], updated_at="2025-06-01T12:00:00Z",
+            number=1,
+            labels=[{"name": "bug"}],
+            updated_at="2025-06-01T12:00:00Z",
         )
 
         with respx.mock:
@@ -518,7 +531,9 @@ class TestLabelFilter:
         adaptor._cursors["acme/app"] = "2025-06-01T00:00:00Z"
 
         issue = _make_issue(
-            number=1, labels=[{"name": "bug"}], updated_at="2025-06-01T12:00:00Z",
+            number=1,
+            labels=[{"name": "bug"}],
+            updated_at="2025-06-01T12:00:00Z",
         )
 
         with respx.mock:
@@ -536,15 +551,15 @@ class TestLabelFilter:
 # Rate limiting
 # ===========================================================================
 
-class TestRateLimit:
 
+class TestRateLimit:
     @pytest.mark.asyncio
     async def test_403_rate_limit_backs_off(self):
         adaptor = _make_adaptor()
         config = _source_config(poll_interval=1)
         adaptor.add_source(config)
 
-        future_ts = int(datetime.now(timezone.utc).timestamp()) + 3600
+        future_ts = int(datetime.now(UTC).timestamp()) + 3600
         recorded_backoff: float = 0
 
         original_sleep = asyncio.sleep
@@ -608,8 +623,8 @@ class TestRateLimit:
 # execute_action
 # ===========================================================================
 
-class TestExecuteAction:
 
+class TestExecuteAction:
     @pytest.mark.asyncio
     async def test_comment_action(self):
         adaptor = _make_adaptor()
@@ -667,7 +682,8 @@ class TestExecuteAction:
             )
             _setup_client(adaptor)
             await adaptor.execute_action(
-                envelope, {"type": "label", "add": ["wontfix", "stale"]},
+                envelope,
+                {"type": "label", "add": ["wontfix", "stale"]},
             )
 
             assert route.called
@@ -684,16 +700,17 @@ class TestExecuteAction:
         )
 
         with respx.mock:
-            r1 = respx.delete(
-                f"{GITHUB_API}/repos/acme/app/issues/42/labels/bug"
-            ).mock(return_value=httpx.Response(200, json=[]))
-            r2 = respx.delete(
-                f"{GITHUB_API}/repos/acme/app/issues/42/labels/help-wanted"
-            ).mock(return_value=httpx.Response(200, json=[]))
+            r1 = respx.delete(f"{GITHUB_API}/repos/acme/app/issues/42/labels/bug").mock(
+                return_value=httpx.Response(200, json=[])
+            )
+            r2 = respx.delete(f"{GITHUB_API}/repos/acme/app/issues/42/labels/help-wanted").mock(
+                return_value=httpx.Response(200, json=[])
+            )
 
             _setup_client(adaptor)
             await adaptor.execute_action(
-                envelope, {"type": "label", "remove": ["bug", "help-wanted"]},
+                envelope,
+                {"type": "label", "remove": ["bug", "help-wanted"]},
             )
 
             assert r1.called
@@ -722,8 +739,8 @@ class TestExecuteAction:
 # Lifecycle
 # ===========================================================================
 
-class TestLifecycle:
 
+class TestLifecycle:
     @pytest.mark.asyncio
     async def test_start_without_sources_is_noop(self):
         adaptor = _make_adaptor()
@@ -792,8 +809,8 @@ class TestLifecycle:
 # Cursor advancement
 # ===========================================================================
 
-class TestCursorAdvancement:
 
+class TestCursorAdvancement:
     @pytest.mark.asyncio
     async def test_cursor_advances_to_latest(self):
         adaptor = _make_adaptor()

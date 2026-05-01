@@ -20,7 +20,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -37,10 +37,11 @@ DEFAULT_POLL_INTERVAL = 120  # seconds
 @dataclass
 class GitHubSourceConfig:
     """Configuration for one GitHub repo subscription."""
+
     owner: str
     repo: str
     poll_interval: int = DEFAULT_POLL_INTERVAL
-    state: str = "all"              # "open", "closed", "all"
+    state: str = "all"  # "open", "closed", "all"
     labels_filter: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=lambda: ["issues", "pull_requests"])
 
@@ -53,9 +54,9 @@ class GitHubAdaptor(BaseAdaptor):
     def __init__(self, token: str | None = None) -> None:
         self._token = token or os.environ.get("GITHUB_TOKEN", "")
         self._sources: dict[str, GitHubSourceConfig] = {}  # key = "owner/repo"
-        self._cursors: dict[str, str] = {}                  # key → ISO timestamp
+        self._cursors: dict[str, str] = {}  # key → ISO timestamp
         self._etags: dict[str, str] = {}
-        self._seen_ids: set[str] = set()                    # dedup source_ids
+        self._seen_ids: set[str] = set()  # dedup source_ids
         self._running = False
         self._client: httpx.AsyncClient | None = None
         self._poll_task: Any | None = None
@@ -70,9 +71,7 @@ class GitHubAdaptor(BaseAdaptor):
         self._sources[key] = config
         # Initialize cursor to now if not set (only picks up *new* updates)
         if key not in self._cursors:
-            self._cursors[key] = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            self._cursors[key] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         logger.info("GitHub source added: %s (poll every %ds)", key, config.poll_interval)
 
     def remove_source(self, owner: str, repo: str) -> None:
@@ -143,7 +142,7 @@ class GitHubAdaptor(BaseAdaptor):
                         # Rate limited — check reset time and back off
                         reset = int(exc.response.headers.get("X-RateLimit-Reset", "0"))
                         if reset:
-                            wait = max(reset - int(datetime.now(timezone.utc).timestamp()), 10)
+                            wait = max(reset - int(datetime.now(UTC).timestamp()), 10)
                             logger.warning("GitHub rate limited — backing off %ds", wait)
                             await asyncio.sleep(wait)
                     else:
@@ -217,13 +216,15 @@ class GitHubAdaptor(BaseAdaptor):
             # Filter by labels if configured
             if config.labels_filter:
                 item_labels = {lbl["name"] for lbl in item.get("labels", [])}
-                if not any(l in item_labels for l in config.labels_filter):
+                if not any(lbl in item_labels for lbl in config.labels_filter):
                     continue
 
             await self._emit(envelope)
             logger.info(
                 "New GitHub envelope: %s [%s] %s",
-                envelope.source_id, envelope.labels, envelope.title[:60],
+                envelope.source_id,
+                envelope.labels,
+                envelope.title[:60],
             )
 
             # Track the latest updated_at for cursor advancement
@@ -281,7 +282,7 @@ class GitHubAdaptor(BaseAdaptor):
             title=f"[{kind}] {item.get('title', 'Untitled')}",
             body="\n\n".join(body_parts) if body_parts else "",
             status=EnvelopeStatus.PENDING,
-            priority=2 if any(l in labels for l in ("bug", "P0", "urgent")) else 1,
+            priority=2 if any(tag in labels for tag in ("bug", "P0", "urgent")) else 1,
             labels=labels,
             metadata={
                 "repo": repo_full,
@@ -293,7 +294,9 @@ class GitHubAdaptor(BaseAdaptor):
                 "created_at": item.get("created_at", ""),
                 "updated_at": item.get("updated_at", ""),
                 "comments": item.get("comments", 0),
-                "reactions": item.get("reactions", {}).get("total_count", 0) if item.get("reactions") else 0,
+                "reactions": item.get("reactions", {}).get("total_count", 0)
+                if item.get("reactions")
+                else 0,
                 "assignees": [a.get("login", "") for a in item.get("assignees", [])],
                 "milestone": (item.get("milestone") or {}).get("title", ""),
             },

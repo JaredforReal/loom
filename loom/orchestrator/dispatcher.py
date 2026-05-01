@@ -7,11 +7,8 @@ to process them.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
-
-from claude_agent_sdk import AgentDefinition, ClaudeAgentOptions
 
 from loom.core.envelope import Envelope, EnvelopeStatus
 from loom.core.eventbus import EventBus
@@ -74,7 +71,10 @@ class Dispatcher:
 
         logger.info(
             "Dispatching envelope %s — agent=%s prompt=%s auto_approve=%s",
-            envelope.id, action.agent, action.prompt, action.auto_approve,
+            envelope.id,
+            action.agent,
+            action.prompt,
+            action.auto_approve,
         )
 
         # Decide: interactive (multi-turn) or one-shot
@@ -110,7 +110,8 @@ class Dispatcher:
 
         result = await self._sessions.query_once(
             prompt=prompt,
-            system_prompt=action.system_prompt or "You are a helpful assistant that processes messages.",
+            system_prompt=action.system_prompt
+            or "You are a helpful assistant that processes messages.",
             allowed_tools=action.tools or None,
         )
 

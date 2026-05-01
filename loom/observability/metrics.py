@@ -8,6 +8,7 @@ from dataclasses import dataclass
 @dataclass
 class DaemonStatus:
     """Snapshot of the daemon's current state."""
+
     online: bool = False
     active_sessions: int = 0
     queue_backlog: int = 0

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 from loom.config import (
-    DEFAULT_LOOM_DIR,
     DaemonSettings,
     LoomConfig,
     PathSettings,

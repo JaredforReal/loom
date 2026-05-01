@@ -251,12 +251,7 @@ class GmailAdaptor(BaseAdaptor):
         self._save_seen()
 
     def _list_message_ids(self) -> list[str]:
-        resp = (
-            self._service.users()
-            .messages()
-            .list(userId=self._user_id, q=self._query)
-            .execute()
-        )
+        resp = self._service.users().messages().list(userId=self._user_id, q=self._query).execute()
         out: list[str] = []
         for entry in resp.get("messages") or []:
             mid = entry.get("id")
@@ -297,16 +292,12 @@ class GmailAdaptor(BaseAdaptor):
         except ValueError:
             internal_ms = 0
         received_at = (
-            datetime.fromtimestamp(internal_ms / 1000)
-            if internal_ms
-            else datetime.utcnow()
+            datetime.fromtimestamp(internal_ms / 1000) if internal_ms else datetime.utcnow()
         )
 
         labels = list(msg.get("labelIds") or [])
         has_attachments = any(
-            bool(p.get("filename"))
-            for p in _walk_parts(payload)
-            if p is not payload
+            bool(p.get("filename")) for p in _walk_parts(payload) if p is not payload
         )
 
         return Envelope(
@@ -367,9 +358,7 @@ class GmailAdaptor(BaseAdaptor):
         mime["Subject"] = subject
         if msg_id_hdr:
             mime["In-Reply-To"] = msg_id_hdr
-            mime["References"] = (
-                f"{references} {msg_id_hdr}".strip() if references else msg_id_hdr
-            )
+            mime["References"] = f"{references} {msg_id_hdr}".strip() if references else msg_id_hdr
         mime.set_content(str(action.get("body", "")))
 
         raw = base64.urlsafe_b64encode(mime.as_bytes()).decode("ascii")
@@ -378,9 +367,7 @@ class GmailAdaptor(BaseAdaptor):
             body["threadId"] = thread_id
         self._service.users().messages().send(userId=self._user_id, body=body).execute()
 
-    def _modify_labels(
-        self, envelope: Envelope, add: list[str], remove: list[str]
-    ) -> None:
+    def _modify_labels(self, envelope: Envelope, add: list[str], remove: list[str]) -> None:
         self._service.users().messages().modify(
             userId=self._user_id,
             id=envelope.source_id,
