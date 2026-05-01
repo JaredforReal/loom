@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "loom"
+version = "0.1.0"
+description = "Mailbox and agent orchestration layer for Claude Code"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    # Core async
+    "anyio>=4.0",
+    # Claude Agent SDK — manages Claude Code sessions
+    "claude-agent-sdk>=0.0.20",
+    # Web framework
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sse-starlette>=2.0",
+    # HTTP client (adaptors)
+    "httpx>=0.27",
+    # Database
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
+    # YAML policy engine
+    "pyyaml>=6.0",
+    # CLI
+    "click>=8.0",
+    "rich>=13.0",
+    # Data validation
+    "pydantic>=2.0",
+    # Scheduling / polling
+    "apscheduler>=3.10",
+    # RSS
+    "feedparser>=6.0",
+]
+
+[project.optional-dependencies]
+gmail = [
+    "google-api-python-client>=2.0",
+    "google-auth-oauthlib>=1.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+loom = "loom.cli.main:cli"
+
+[project.entry-points."loom.adaptors"]
+github = "loom.adaptor.github:GitHubAdaptor"
+rss = "loom.adaptor.rss:RSSAdaptor"
+gmail = "loom.adaptor.gmail:GmailAdaptor"
+anet = "loom.adaptor.anet:AnetAdaptor"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
