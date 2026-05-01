@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import anyio
+import httplib2  # type: ignore[import-untyped]
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -109,6 +110,31 @@ def _decode_body(payload: dict[str, Any]) -> str:
     return plain or html
 
 
+def _build_http(proxy_url: str | None) -> Any:
+    if proxy_url is None:
+        return httplib2.Http()
+    # Minimal parsing: scheme://host:port
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(proxy_url)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 8080
+        if parsed.scheme in ("http", "https"):
+            proxy_type = httplib2.socks.PROXY_TYPE_HTTP
+        elif parsed.scheme == "socks5":
+            proxy_type = httplib2.socks.PROXY_TYPE_SOCKS5
+        elif parsed.scheme == "socks4":
+            proxy_type = httplib2.socks.PROXY_TYPE_SOCKS4
+        else:
+            logger.warning("Unsupported proxy scheme %s, using no proxy", parsed.scheme)
+            return httplib2.Http()
+        return httplib2.Http(proxy_info=httplib2.ProxyInfo(proxy_type, host, port))
+    except Exception:
+        logger.warning("Failed to parse proxy_url %s, using no proxy", proxy_url)
+        return httplib2.Http()
+
+
 def _load_credentials(client_secrets: Path, token_path: Path) -> Any:
     """Run InstalledAppFlow on first call, refresh thereafter."""
     creds: Any = None
@@ -145,6 +171,7 @@ class GmailAdaptor(BaseAdaptor):
         query: str = DEFAULT_QUERY,
         poll_seconds: int = DEFAULT_POLL_SECONDS,
         user_id: str = "me",
+        proxy_url: str | None = None,
     ) -> None:
         self._mailbox = mailbox
         self._client_secrets = client_secrets_path
@@ -153,6 +180,7 @@ class GmailAdaptor(BaseAdaptor):
         self._query = query
         self._poll_seconds = poll_seconds
         self._user_id = user_id
+        self._proxy_url = proxy_url
 
         self._service: Any = None
         self._scheduler: AsyncIOScheduler | None = None
@@ -167,8 +195,9 @@ class GmailAdaptor(BaseAdaptor):
         creds = await anyio.to_thread.run_sync(
             _load_credentials, self._client_secrets, self._token_path
         )
+        http = await anyio.to_thread.run_sync(_build_http, self._proxy_url)
         self._service = await anyio.to_thread.run_sync(
-            lambda: build("gmail", "v1", credentials=creds, cache_discovery=False)
+            lambda: build("gmail", "v1", credentials=creds, http=http, cache_discovery=False)
         )
         self._load_seen()
 
