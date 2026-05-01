@@ -1,0 +1,18 @@
+rules:
+  - name: "Critical GitHub issues and PRs"
+    match:
+      source: github
+      labels: ["bug", "P0"]
+    action:
+      priority: 3
+      prompt: "prompt_github_issue"
+      tools: ["Read", "Grep", "WebFetch"]
+      auto_approve: false
+
+  - name: "GitHub issues and PRs (general)"
+    match:
+      source: github
+    action:
+      priority: 1
+      prompt: "prompt_github_issue"
+      auto_approve: false
