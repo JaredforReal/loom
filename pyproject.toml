@@ -27,7 +27,6 @@ dependencies = [
     # YAML policy engine
     "pyyaml>=6.0",
     # CLI
-    "click>=8.0",
     "rich>=13.0",
     # Data validation
     "pydantic>=2.0",
