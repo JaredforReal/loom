@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pre-commit
+      - run: pre-commit run --all-files
+
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check DCO (Signed-off-by)
+        run: |
+          commits=$(git log --format='%H%n%B' origin/main..HEAD)
+          echo "$commits" | awk '
+            /^[0-9a-f]{40}$/ { hash=$0; body=""; next }
+            /^$/ { next }
+            { body = body $0 "\n" }
+            END { if (body !~ /Signed-off-by:/) { print "Missing Signed-off-by in commit " hash; exit 1 } }
+          '
+          # Check each commit individually
+          for commit in $(git rev-list origin/main..HEAD); do
+            body=$(git log -1 --format='%B' "$commit")
+            if ! echo "$body" | grep -q "Signed-off-by:"; then
+              echo "ERROR: Commit $(git log -1 --format='%h %s' "$commit") is missing Signed-off-by"
+              echo "Use: git commit -s"
+              exit 1
+            fi
+          done
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv pip install -e ".[dev]" --system
+      - name: Run tests
+        run: python -m pytest tests/ -v
