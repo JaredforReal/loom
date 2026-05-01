@@ -97,7 +97,9 @@ class Store:
         self._session_factory: async_sessionmaker[AsyncSession] | None = None
 
     async def init(self) -> None:
-        """Create tables if they don't exist."""
+        """Create tables if they don't exist. Safe to call multiple times."""
+        if self._session_factory is not None:
+            return
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._engine = create_async_engine(
             f"sqlite+aiosqlite:///{self._db_path}",

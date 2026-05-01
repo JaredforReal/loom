@@ -39,7 +39,7 @@ echo $GITHUB_TOKEN
 
 ```bash
 # 在项目根目录创建 .env
-echo 'GITHUB_TOKEN=ghp_xxxxxxxxxxxx' >> loom/.env
+echo 'GITHUB_TOKEN=ghp_xxxxxxxxxxxx' >> .env
 ```
 
 > 确保 `.env` 在 `.gitignore` 中，不要提交到版本控制。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -150,7 +151,9 @@ class TestSaveAndGetEnvelope:
 class TestQueryEnvelopes:
     async def test_returns_newest_first(self, store: Store) -> None:
         env1 = _make_envelope(source_id="old", title="First")
+        env1.received_at = datetime(2024, 1, 1)
         env2 = _make_envelope(source_id="new", title="Second")
+        env2.received_at = datetime(2024, 1, 2)
         await store.save_envelope(env1)
         await store.save_envelope(env2)
         results = await store.query_envelopes()

@@ -39,7 +39,7 @@ echo $GITHUB_TOKEN
 
 ```bash
 # Create .env in the project root
-echo 'GITHUB_TOKEN=ghp_xxxxxxxxxxxx' >> ~/.env
+echo 'GITHUB_TOKEN=ghp_xxxxxxxxxxxx' >> .env
 ```
 
 > Make sure `.env` is in `.gitignore` — never commit it to version control.
