@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from loom.cli.commands import approve, daemon, doctor, inbox, reject, show, status, ui
 from loom.config import load_config, save_config
 
 
@@ -11,20 +12,6 @@ from loom.config import load_config, save_config
 @click.version_option()
 def cli() -> None:
     """Loom — Mailbox and agent orchestration for Claude Code."""
-
-
-@cli.command()
-def daemon() -> None:
-    """Start the Loom daemon (mailbox + dispatcher + web UI)."""
-    click.echo("Starting Loom daemon...")
-    # TODO: Initialize store, bus, mailbox, adaptors, dispatcher, web UI
-    # TODO: asyncio.run(main_loop())
-
-
-@cli.command()
-def status() -> None:
-    """Show daemon status, active sessions, and queue backlog."""
-    click.echo("Loom status: not yet implemented")
 
 
 @cli.group()
@@ -131,11 +118,14 @@ def source_list() -> None:
         click.echo(f"  {i}. [{kind}] {label}")
 
 
-@cli.command()
-def ui() -> None:
-    """Open the Loom web UI in a browser."""
-    click.echo("Opening http://localhost:8732 ...")
-    # TODO: webbrowser.open("http://localhost:8732")
+cli.add_command(daemon)
+cli.add_command(status)
+cli.add_command(ui)
+cli.add_command(inbox)
+cli.add_command(show)
+cli.add_command(approve)
+cli.add_command(reject)
+cli.add_command(doctor)
 
 
 if __name__ == "__main__":
