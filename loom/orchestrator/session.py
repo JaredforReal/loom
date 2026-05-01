@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -77,10 +78,12 @@ class SessionManager:
         self,
         max_concurrent: int = 3,
         prompt_dir: Path | None = None,
+        on_complete: Callable[[Session], Awaitable[None]] | None = None,
     ) -> None:
         self._sessions: dict[str, Session] = {}
         self._max_concurrent = max_concurrent
         self._prompt_dir = prompt_dir or Path.home() / ".loom" / "prompts"
+        self._on_complete = on_complete
         self._templates: dict[str, str] = {}
         self._load_prompt_templates()
 
@@ -177,6 +180,11 @@ class SessionManager:
         if client is None:
             session.status = SessionStatus.FAILED
             session.error = "No client attached"
+            if self._on_complete:
+                try:
+                    await self._on_complete(session)
+                except Exception:
+                    logger.exception("on_complete callback failed for session %s", session.id)
             return
 
         try:
@@ -220,6 +228,11 @@ class SessionManager:
         finally:
             await client.disconnect()
             session._client = None
+            if self._on_complete:
+                try:
+                    await self._on_complete(session)
+                except Exception:
+                    logger.exception("on_complete callback failed for session %s", session.id)
 
     # ------------------------------------------------------------------
     # Follow-up on an existing interactive session

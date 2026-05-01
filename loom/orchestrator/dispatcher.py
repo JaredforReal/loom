@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from loom.core.envelope import Envelope, EnvelopeStatus
 from loom.core.eventbus import EventBus
 from loom.orchestrator.policy import PolicyAction, PolicyEngine
-from loom.orchestrator.session import SessionManager
+from loom.orchestrator.session import Session, SessionManager, SessionStatus
 
 if TYPE_CHECKING:
     from loom.core.mailbox import Mailbox
@@ -157,3 +157,38 @@ class Dispatcher:
             source_id=envelope.source_id,
             labels=", ".join(envelope.labels),
         )
+
+    # ------------------------------------------------------------------
+    # Session completion callback
+    # ------------------------------------------------------------------
+
+    async def handle_session_complete(self, session: Session) -> None:
+        """Called by SessionManager when a background session finishes.
+
+        Updates the associated envelope's status and agent output fields.
+        """
+        if not session.envelope_id:
+            return
+
+        envelope = await self._mailbox._store.get_envelope(session.envelope_id)
+        if envelope is None:
+            logger.warning(
+                "Session %s completed but envelope %s not found", session.id, session.envelope_id
+            )
+            return
+
+        if session.status == SessionStatus.COMPLETED:
+            envelope.agent_summary = session.result
+            envelope.agent_log = [
+                {"step": s.step, "input": s.input, "output": s.output, "timestamp": s.timestamp}
+                for s in session.steps
+            ]
+            await self._mailbox.update_status(envelope.id, EnvelopeStatus.WAITING_APPROVAL)
+            logger.info(
+                "Envelope %s -> WAITING_APPROVAL (session %s completed)", envelope.id, session.id
+            )
+
+        elif session.status == SessionStatus.FAILED:
+            envelope.agent_summary = f"Session failed: {session.error}"
+            await self._mailbox.update_status(envelope.id, EnvelopeStatus.FAILED)
+            logger.error("Envelope %s -> FAILED (session %s)", envelope.id, session.id)
