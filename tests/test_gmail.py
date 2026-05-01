@@ -319,9 +319,7 @@ async def test_execute_action_reply_explicit_to_overrides_from(tmp_path: Path) -
         source_id="msg-1",
         metadata={"from": "noreply@example.com"},
     )
-    await ad.execute_action(
-        env, {"type": "reply", "body": "ok", "to": "human@example.com"}
-    )
+    await ad.execute_action(env, {"type": "reply", "body": "ok", "to": "human@example.com"})
     send = ad._service.users.return_value.messages.return_value.send
     raw = base64.urlsafe_b64decode(send.call_args.kwargs["body"]["raw"]).decode("utf-8")
     assert "To: human@example.com" in raw
@@ -345,9 +343,7 @@ async def test_execute_action_label_adds_labels(tmp_path: Path) -> None:
     service = MagicMock()
     ad._service = service
     env = Envelope(source="gmail", source_id="msg-1")
-    await ad.execute_action(
-        env, {"type": "label", "labels": ["IMPORTANT", "STARRED"]}
-    )
+    await ad.execute_action(env, {"type": "label", "labels": ["IMPORTANT", "STARRED"]})
     service.users.return_value.messages.return_value.modify.assert_called_once_with(
         userId="me",
         id="msg-1",

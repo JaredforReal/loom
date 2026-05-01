@@ -39,21 +39,23 @@ import yaml
 @dataclass
 class PolicyAction:
     """What to do when a rule matches."""
+
     priority: int = 1
-    agent: str = ""                    # AgentDefinition name (optional)
-    prompt: str = ""                   # Prompt template name or inline text
+    agent: str = ""  # AgentDefinition name (optional)
+    prompt: str = ""  # Prompt template name or inline text
     auto_approve: bool = False
     batch: bool = False
-    batch_window: str = ""             # e.g. "6h", "1d"
+    batch_window: str = ""  # e.g. "6h", "1d"
     tools: list[str] = field(default_factory=list)  # allowed_tools override
-    max_turns: int | None = None       # limit agent turns
-    system_prompt: str = ""            # Override system prompt
-    model: str = ""                    # e.g. "sonnet", "opus"
+    max_turns: int | None = None  # limit agent turns
+    system_prompt: str = ""  # Override system prompt
+    model: str = ""  # e.g. "sonnet", "opus"
 
 
 @dataclass
 class PolicyRule:
     """A single routing rule."""
+
     name: str = ""
     match: dict = field(default_factory=dict)
     action: PolicyAction = field(default_factory=PolicyAction)
@@ -90,11 +92,13 @@ class PolicyEngine:
                 system_prompt=action_data.get("system_prompt", ""),
                 model=action_data.get("model", ""),
             )
-            self._rules.append(PolicyRule(
-                name=rule_data.get("name", ""),
-                match=rule_data.get("match", {}),
-                action=action,
-            ))
+            self._rules.append(
+                PolicyRule(
+                    name=rule_data.get("name", ""),
+                    match=rule_data.get("match", {}),
+                    action=action,
+                )
+            )
 
     def evaluate(self, envelope) -> PolicyAction | None:
         """Return the first matching rule's action, or None."""
@@ -108,14 +112,16 @@ class PolicyEngine:
         if "source" in match and envelope.source != match["source"]:
             return False
         if "labels" in match:
-            if not all(l in envelope.labels for l in match["labels"]):
+            if not all(lbl in envelope.labels for lbl in match["labels"]):
                 return False
         if "source_id_pattern" in match:
             import re
+
             if not re.search(match["source_id_pattern"], envelope.source_id):
                 return False
         if "title_pattern" in match:
             import re
+
             if not re.search(match["title_pattern"], envelope.title, re.IGNORECASE):
                 return False
         return True

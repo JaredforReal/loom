@@ -107,7 +107,9 @@ class TestSaveAndGetEnvelope:
         assert loaded.metadata["number"] == 42
 
     async def test_agent_log_roundtrip(self, store: Store) -> None:
-        log = [{"step": "triage", "input": "read issue", "output": "classified", "ts": "2024-01-01"}]
+        log = [
+            {"step": "triage", "input": "read issue", "output": "classified", "ts": "2024-01-01"}
+        ]
         env = _make_envelope(agent_log=log)
         await store.save_envelope(env)
         loaded = await store.get_envelope(env.id)
@@ -195,7 +197,9 @@ class TestQueryEnvelopes:
 class TestGetUnreadCounts:
     async def test_counts_pending_and_waiting(self, store: Store) -> None:
         await store.save_envelope(_make_envelope(source="github", status=EnvelopeStatus.PENDING))
-        await store.save_envelope(_make_envelope(source="github", status=EnvelopeStatus.WAITING_APPROVAL))
+        await store.save_envelope(
+            _make_envelope(source="github", status=EnvelopeStatus.WAITING_APPROVAL)
+        )
         await store.save_envelope(_make_envelope(source="github", status=EnvelopeStatus.DONE))
         counts = await store.get_unread_counts()
         assert counts.get("github") == 2

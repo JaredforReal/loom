@@ -35,7 +35,9 @@ def source() -> None:
 @source.command("add")
 @click.argument("kind", type=click.Choice(["github", "rss", "gmail", "anet"]))
 @click.option("--repo", help="GitHub repo (owner/repo)", multiple=True)
-@click.option("--events", help="GitHub events to track (issues,pull_requests)", default="issues,pull_requests")
+@click.option(
+    "--events", help="GitHub events to track (issues,pull_requests)", default="issues,pull_requests"
+)
 @click.option("--interval", help="Poll interval in seconds", default=120, type=int)
 @click.option("--state", help="Issue/PR state filter (open, closed, all)", default="all")
 @click.option("--url", help="Feed URL (RSS)")
@@ -78,7 +80,8 @@ def source_add(
             click.echo(f"  Added: {r} (events={event_list}, interval={interval}s, state={state})")
 
         save_config(config)
-        click.echo(f"\nGitHub source(s) saved to config. Token: {'provided' if token else 'GITHUB_TOKEN env'}")
+        tok = "provided" if token else "GITHUB_TOKEN env"
+        click.echo(f"\nGitHub source(s) saved to config. Token: {tok}")
         click.echo("Run `loom daemon` to start monitoring.")
 
     elif kind == "gmail":
@@ -88,7 +91,7 @@ def source_add(
         }
         config.sources.append(source_entry)
         save_config(config)
-        click.echo(f"Gmail source saved to config.")
+        click.echo("Gmail source saved to config.")
         click.echo("Run `loom daemon` to start monitoring.")
 
     elif kind == "rss":

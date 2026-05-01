@@ -75,10 +75,14 @@ def load_config(path: Path | None = None) -> LoomConfig:
 
     paths_raw = raw.get("paths", {})
     paths = PathSettings(
-        policies_dir=Path(paths_raw.get("policies_dir", DEFAULT_LOOM_DIR / "policies")).expanduser(),
+        policies_dir=Path(
+            paths_raw.get("policies_dir", DEFAULT_LOOM_DIR / "policies")
+        ).expanduser(),
         prompts_dir=Path(paths_raw.get("prompts_dir", DEFAULT_LOOM_DIR / "prompts")).expanduser(),
         data_dir=Path(paths_raw.get("data_dir", DEFAULT_LOOM_DIR / "data")).expanduser(),
-        credentials_dir=Path(paths_raw.get("credentials_dir", DEFAULT_LOOM_DIR / "credentials")).expanduser(),
+        credentials_dir=Path(
+            paths_raw.get("credentials_dir", DEFAULT_LOOM_DIR / "credentials")
+        ).expanduser(),
     )
 
     sources = []
