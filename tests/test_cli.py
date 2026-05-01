@@ -1,4 +1,4 @@
-"""Tests for loom.cli — CliRunner smoke tests over the Store-backed commands."""
+"""Tests for loom.cli — smoke tests over the Store-backed commands."""
 
 from __future__ import annotations
 
@@ -6,11 +6,22 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
 
 from loom.cli.main import cli
 from loom.core.envelope import Envelope, EnvelopeStatus
 from loom.state.store import Store
+
+
+def _run(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, str]:
+    """Invoke the CLI with argv and capture stdout+stderr, returning (exit_code, output)."""
+    try:
+        cli(argv)
+        code = 0
+    except SystemExit as exc:
+        raw = exc.code
+        code = 0 if raw is None else (int(raw) if isinstance(raw, int | str) else 1)
+    captured = capsys.readouterr()
+    return code, captured.out + captured.err
 
 
 def _make_envelope(
@@ -64,40 +75,42 @@ def isolated_loom(tmp_loom_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class TestInbox:
-    def test_empty(self, isolated_loom: Path) -> None:
-        result = CliRunner().invoke(cli, ["inbox"])
-        assert result.exit_code == 0
-        assert "no messages" in result.output
+    def test_empty(self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        code, out = _run(["inbox"], capsys)
+        assert code == 0
+        assert "no messages" in out
 
-    def test_lists_envelopes(self, isolated_loom: Path) -> None:
+    def test_lists_envelopes(self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]) -> None:
         env = _make_envelope(title="Login bug")
         asyncio.run(_seed(isolated_loom / "data" / "loom.db", [env]))
-        result = CliRunner().invoke(cli, ["inbox"])
-        assert result.exit_code == 0
-        assert env.id[:8] in result.output
-        assert "Login bug" in result.output
+        code, out = _run(["inbox"], capsys)
+        assert code == 0
+        assert env.id[:8] in out
+        assert "Login bug" in out
 
-    def test_filter_by_source(self, isolated_loom: Path) -> None:
+    def test_filter_by_source(
+        self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         envs = [_make_envelope(source="github"), _make_envelope(source="gmail")]
         asyncio.run(_seed(isolated_loom / "data" / "loom.db", envs))
-        result = CliRunner().invoke(cli, ["inbox", "--source", "gmail"])
-        assert result.exit_code == 0
-        assert envs[1].id[:8] in result.output
-        assert envs[0].id[:8] not in result.output
+        code, out = _run(["inbox", "--source", "gmail"], capsys)
+        assert code == 0
+        assert envs[1].id[:8] in out
+        assert envs[0].id[:8] not in out
 
 
 class TestShow:
-    def test_missing(self, isolated_loom: Path) -> None:
-        result = CliRunner().invoke(cli, ["show", "abcd1234"])
-        assert result.exit_code == 1
-        assert "no envelope matching" in result.output
+    def test_missing(self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        code, out = _run(["show", "abcd1234"], capsys)
+        assert code == 1
+        assert "no envelope matching" in out
 
-    def test_by_prefix(self, isolated_loom: Path) -> None:
+    def test_by_prefix(self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]) -> None:
         env = _make_envelope(title="Trace null deref")
         asyncio.run(_seed(isolated_loom / "data" / "loom.db", [env]))
-        result = CliRunner().invoke(cli, ["show", env.id[:8]])
-        assert result.exit_code == 0
-        assert "Trace null deref" in result.output
+        code, out = _run(["show", env.id[:8]], capsys)
+        assert code == 0
+        assert "Trace null deref" in out
 
 
 # ---------------------------------------------------------------------------
@@ -106,28 +119,32 @@ class TestShow:
 
 
 class TestApprove:
-    def test_marks_envelope_done(self, isolated_loom: Path) -> None:
+    def test_marks_envelope_done(
+        self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         env = _make_envelope()
         db = isolated_loom / "data" / "loom.db"
         asyncio.run(_seed(db, [env]))
 
-        result = CliRunner().invoke(cli, ["approve", env.id])
-        assert result.exit_code == 0
-        assert "Approved" in result.output
+        code, out = _run(["approve", env.id], capsys)
+        assert code == 0
+        assert "Approved" in out
 
         assert asyncio.run(_read_status(db, env.id)) == EnvelopeStatus.DONE
 
 
 class TestReject:
-    def test_marks_envelope_dismissed(self, isolated_loom: Path) -> None:
+    def test_marks_envelope_dismissed(
+        self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         env = _make_envelope()
         db = isolated_loom / "data" / "loom.db"
         asyncio.run(_seed(db, [env]))
 
-        result = CliRunner().invoke(cli, ["reject", env.id, "--reason", "spam"])
-        assert result.exit_code == 0
-        assert "Rejected" in result.output
-        assert "spam" in result.output
+        code, out = _run(["reject", env.id, "--reason", "spam"], capsys)
+        assert code == 0
+        assert "Rejected" in out
+        assert "spam" in out
 
         assert asyncio.run(_read_status(db, env.id)) == EnvelopeStatus.DISMISSED
 
@@ -138,22 +155,24 @@ class TestReject:
 
 
 class TestStatus:
-    def test_shows_counts(self, isolated_loom: Path) -> None:
+    def test_shows_counts(self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]) -> None:
         envs = [
             _make_envelope(status=EnvelopeStatus.PENDING),
             _make_envelope(status=EnvelopeStatus.WAITING_APPROVAL),
             _make_envelope(status=EnvelopeStatus.WAITING_APPROVAL),
         ]
         asyncio.run(_seed(isolated_loom / "data" / "loom.db", envs))
-        result = CliRunner().invoke(cli, ["status"])
-        assert result.exit_code == 0
-        assert "queued 1" in result.output
-        assert "waiting_approval" in result.output
+        code, out = _run(["status"], capsys)
+        assert code == 0
+        assert "queued 1" in out
+        assert "waiting_approval" in out
 
 
 class TestDoctor:
-    def test_fails_on_empty_setup(self, isolated_loom: Path) -> None:
+    def test_fails_on_empty_setup(
+        self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         # No config, no sources, no db — doctor should exit non-zero.
-        result = CliRunner().invoke(cli, ["doctor"])
-        assert result.exit_code == 1
-        assert "config.yaml" in result.output
+        code, out = _run(["doctor"], capsys)
+        assert code == 1
+        assert "config.yaml" in out

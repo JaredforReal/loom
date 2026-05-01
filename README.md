@@ -148,7 +148,7 @@ loom/
 ├── observability/           # Monitoring & metrics
 │   └── metrics.py           #   Daemon status, session count
 ├── cli/                     # CLI entry point
-│   └── main.py              #   `loom` Click commands
+│   └── main.py              #   `loom` argparse parser + commands
 ├── webui/                   # Web interface
 │   └── app.py               #   FastAPI REST API
 ├── policies/                # Default policy files
