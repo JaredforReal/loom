@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click
 
-from loom.adaptor.github import GitHubAdaptor, GitHubSourceConfig
+from loom.config import load_config, save_config
 
 
 @click.group()
@@ -52,6 +52,8 @@ def source_add(
     token: str | None,
 ) -> None:
     """Add a new source subscription."""
+    config = load_config()
+
     if kind == "github":
         if not repo:
             click.echo("Error: --repo is required for GitHub sources (e.g. --repo owner/repo)")
@@ -64,29 +66,66 @@ def source_add(
                 click.echo(f"Error: Invalid repo format '{r}' — expected 'owner/repo'")
                 raise SystemExit(1)
 
-            config = GitHubSourceConfig(
-                owner=parts[0],
-                repo=parts[1],
-                poll_interval=interval,
-                state=state,
-                events=event_list,
-            )
+            source_entry = {
+                "kind": "github",
+                "owner": parts[0],
+                "repo": parts[1],
+                "poll_interval": interval,
+                "events": event_list,
+                "state": state,
+            }
+            config.sources.append(source_entry)
             click.echo(f"  Added: {r} (events={event_list}, interval={interval}s, state={state})")
-            # TODO: Persist config to ~/.loom/config.yaml and restart adaptor
-        click.echo(f"\nGitHub source(s) configured. Token: {'provided' if token else 'GITHUB_TOKEN env'}")
+
+        save_config(config)
+        click.echo(f"\nGitHub source(s) saved to config. Token: {'provided' if token else 'GITHUB_TOKEN env'}")
+        click.echo("Run `loom daemon` to start monitoring.")
+
+    elif kind == "gmail":
+        source_entry = {
+            "kind": "gmail",
+            "client_secrets": credentials or "~/.loom/credentials/gmail-client-secrets.json",
+        }
+        config.sources.append(source_entry)
+        save_config(config)
+        click.echo(f"Gmail source saved to config.")
+        click.echo("Run `loom daemon` to start monitoring.")
 
     elif kind == "rss":
-        click.echo(f"Adding RSS source: {url}")
-    elif kind == "gmail":
-        click.echo(f"Adding Gmail source (credentials: {credentials})")
+        if not url:
+            click.echo("Error: --url is required for RSS sources")
+            raise SystemExit(1)
+        source_entry = {"kind": "rss", "url": url}
+        config.sources.append(source_entry)
+        save_config(config)
+        click.echo(f"RSS source saved: {url}")
+
     elif kind == "anet":
-        click.echo("Adding anet source...")
+        source_entry = {"kind": "anet"}
+        config.sources.append(source_entry)
+        save_config(config)
+        click.echo("Anet source saved to config.")
 
 
 @source.command("list")
 def source_list() -> None:
     """List configured sources."""
-    click.echo("Configured sources: (none yet — use `loom source add github --repo owner/repo`)")
+    config = load_config()
+    if not config.sources:
+        click.echo("No sources configured. Use `loom source add <kind>` to add one.")
+        return
+
+    for i, s in enumerate(config.sources, 1):
+        kind = s.get("kind", "unknown")
+        if kind == "github":
+            label = f"{s.get('owner', '?')}/{s.get('repo', '?')}"
+        elif kind == "gmail":
+            label = f"Gmail ({s.get('query', 'is:unread')})"
+        elif kind == "rss":
+            label = s.get("url", "unknown")
+        else:
+            label = str(s)
+        click.echo(f"  {i}. [{kind}] {label}")
 
 
 @cli.command()
