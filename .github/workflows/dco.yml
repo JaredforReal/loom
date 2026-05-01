@@ -1,0 +1,40 @@
+name: DCO
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check DCO (Signed-off-by)
+        run: |
+          # For PRs: check commits since base branch
+          # For pushes to main: check the latest commit(s)
+          if [ -n "$GITHUB_BASE_REF" ]; then
+            range="origin/$GITHUB_BASE_REF..HEAD"
+          else
+            range="HEAD~1..HEAD"
+          fi
+
+          failed=0
+          for commit in $(git rev-list --no-merges "$range"); do
+            body=$(git log -1 --format='%B' "$commit")
+            if ! echo "$body" | grep -q "Signed-off-by:"; then
+              echo "ERROR: Commit $(git log -1 --format='%h %s' "$commit") is missing Signed-off-by"
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -eq 1 ]; then
+            echo ""
+            echo "Use: git commit -s"
+            echo "Or:  git commit --amend -s"
+            exit 1
+          fi

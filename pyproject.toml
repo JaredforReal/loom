@@ -7,7 +7,7 @@ name = "loom"
 version = "0.1.0"
 description = "Mailbox and agent orchestration layer for Claude Code"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
     # Core async
@@ -62,7 +62,7 @@ gmail = "loom.adaptor.gmail:GmailAdaptor"
 anet = "loom.adaptor.anet:AnetAdaptor"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
@@ -73,5 +73,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true

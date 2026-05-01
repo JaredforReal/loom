@@ -15,3 +15,17 @@ repos:
       - id: check-toml
       - id: check-added-large-files
       - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      - id: signoff-commit
+        name: Sign-off Commit
+        entry: >-
+          bash -c
+          'if ! grep -q "^Signed-off-by:" "$(git rev-parse --git-path COMMIT_EDITMSG)";
+          then
+          printf "\nSigned-off-by: $(git config user.name) <$(git config user.email)>\n"
+          >> "$(git rev-parse --git-path COMMIT_EDITMSG)";
+          fi'
+        language: system
+        stages: [commit-msg]
