@@ -79,7 +79,7 @@ def _make_message(
 
 def _build_adaptor(tmp_path: Path) -> GmailAdaptor:
     bus = EventBus()
-    store = Store()
+    store = Store(db_path=tmp_path / "test.db")
     mailbox = Mailbox(store, bus)
     return GmailAdaptor(
         mailbox=mailbox,
@@ -88,6 +88,13 @@ def _build_adaptor(tmp_path: Path) -> GmailAdaptor:
         state_path=tmp_path / "state.json",
         poll_seconds=1,
     )
+
+
+async def _build_adaptor_with_store(tmp_path: Path) -> GmailAdaptor:
+    """Like _build_adaptor but initializes the SQLite store."""
+    ad = _build_adaptor(tmp_path)
+    await ad._mailbox._store.init()
+    return ad
 
 
 # -- helpers -------------------------------------------------------------------
@@ -366,7 +373,7 @@ async def test_execute_action_trash(tmp_path: Path) -> None:
 
 
 async def test_poll_ingests_new_messages_and_records_seen(tmp_path: Path) -> None:
-    ad = _build_adaptor(tmp_path)
+    ad = await _build_adaptor_with_store(tmp_path)
     received: list[Envelope] = []
 
     async def capture(_event: str, env: object) -> None:
@@ -400,7 +407,7 @@ async def test_poll_ingests_new_messages_and_records_seen(tmp_path: Path) -> Non
 
 
 async def test_poll_skips_already_seen(tmp_path: Path) -> None:
-    ad = _build_adaptor(tmp_path)
+    ad = await _build_adaptor_with_store(tmp_path)
     ad._record_seen("a")
 
     received: list[Envelope] = []
@@ -439,7 +446,7 @@ async def test_poll_swallows_http_error_on_list(tmp_path: Path) -> None:
 
 
 async def test_poll_continues_when_one_message_fails(tmp_path: Path) -> None:
-    ad = _build_adaptor(tmp_path)
+    ad = await _build_adaptor_with_store(tmp_path)
     received: list[Envelope] = []
 
     async def capture(_event: str, env: object) -> None:
