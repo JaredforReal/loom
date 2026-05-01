@@ -24,7 +24,7 @@ jobs:
           fi
 
           failed=0
-          for commit in $(git rev-list "$range"); do
+          for commit in $(git rev-list --no-merges "$range"); do
             body=$(git log -1 --format='%B' "$commit")
             if ! echo "$body" | grep -q "Signed-off-by:"; then
               echo "ERROR: Commit $(git log -1 --format='%h %s' "$commit") is missing Signed-off-by"
