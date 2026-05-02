@@ -1,8 +1,8 @@
 # Loom
 
-Loom is a mailbox and agent orchestration layer for Claude Code. It receives messages from external sources (GitHub, RSS, Gmail, Agent Network), dispatches them to Claude Code sessions for processing, and surfaces results to the user for final decision-making.
+Loom is a mailbox and agent orchestration layer for Claude Code. It receives messages from external sources (GitHub, RSS, Gmail), dispatches them to Claude Code sessions for preprocessing (summarization, triage, classification), and surfaces results for user approval.
 
-The core idea: **make passive LLM agents proactive** by turning external events into actionable agent tasks.
+**Philosophy: help you read, not help you do.** The agent is a preprocessor, not a task executor.
 
 ## Architecture
 
@@ -72,8 +72,8 @@ loom/
 │   └── anet.py              #   Agent Network peer (stub)
 ├── orchestrator/            # Agent coordination (claude-agent-sdk)
 │   ├── session.py           #   Claude Code session manager
-│   ├── dispatcher.py        #   Envelope → agent dispatch + session completion
-│   └── policy.py            #   YAML policy engine
+│   ├── dispatcher.py        #   Envelope → agent dispatch + agent/mailbox toggle
+│   └── policy.py            #   YAML policy engine (bundled + user rules)
 ├── state/                   # Persistence layer
 │   └── store.py             #   SQLite store (SQLAlchemy + aiosqlite)
 ├── cli/                     # CLI entry point
@@ -83,17 +83,19 @@ loom/
 │   └── app.py               #   FastAPI REST API (wired to DaemonContext)
 ├── observability/           # Monitoring & metrics
 │   └── metrics.py           #   Daemon status, session count
-├── policies/                # Default policy files
-│   └── github.yaml          #   GitHub routing rules
-└── prompts/                 # Default prompt templates
-    └── prompt_github_issue.md
+├── policies/                # Bundled policy defaults
+│   ├── github.yaml          #   GitHub routing rules
+│   └── gmail.yaml           #   Gmail routing rules
+└── prompts/                 # Bundled prompt templates
+    ├── prompt_github_issue.md
+    └── prompt_gmail.md
 ```
 
 ## Quick Start
 
 ```bash
-# Install (dev mode)
-pip install -e ".[dev]"
+# Install
+pip install -e .
 
 # For Gmail support
 pip install -e ".[gmail]"
@@ -102,8 +104,11 @@ pip install -e ".[gmail]"
 export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
 loom source add github --repo owner/repo --events issues,pull_requests
 
-# Start the daemon (background)
+# Start the daemon (background, default)
 loom daemon
+
+# Or start in foreground
+loom daemon -f
 
 # Check status
 loom status
@@ -116,8 +121,32 @@ loom approve <envelope_id>
 loom reject <envelope_id>
 
 # Stop the daemon
-kill $(cat ~/.loom/data/loom.pid)
+loom down
 ```
+
+## Mailbox / Agent Control
+
+Mailbox (adaptors) and agent (Claude Code processor) can be toggled independently:
+
+```bash
+# Both running (default after `loom daemon`)
+# - Adaptors collect envelopes
+# - Agent processes them through Claude Code
+
+# Pause agent, keep collecting
+loom agent off     # Envelopes stay PENDING, no token consumption
+loom agent on      # Resume processing, drain backlog
+
+# Pause mailbox, keep processing
+loom mailbox off   # Stop adaptors, agent processes pending backlog
+loom mailbox on    # Restart adaptors
+
+# Check status
+loom agent status
+loom mailbox status
+```
+
+Agent concurrency is controlled by `max_concurrent` in config (default: 3). The session manager uses a semaphore to enforce this — only N Claude Code sessions run simultaneously regardless of backlog size.
 
 ## Configuration
 
@@ -126,13 +155,15 @@ Loom stores all state in `~/.loom/`:
 ```
 ~/.loom/
 ├── config.yaml          # Daemon settings + source subscriptions
-├── policies/            # Policy rule files (*.yaml)
-├── prompts/             # Prompt templates (*.md)
+├── .env                 # Environment variables (GITHUB_TOKEN, etc.)
+├── policies/            # User policy overrides (shadow bundled defaults)
+├── prompts/             # User prompt overrides + per-source prompts
+│   └── github/          #   Per-source prompts (e.g. github/acme-app.md)
 ├── credentials/         # OAuth tokens, API keys
 └── data/
     ├── loom.db          # SQLite state (envelopes + adaptor state)
     ├── loom.pid         # Daemon PID file
-    └── loom.log         # Daemon log output
+    └── loom.log         # Daemon log output (rotating, 10MB)
 ```
 
 ### config.yaml
@@ -141,6 +172,7 @@ Loom stores all state in `~/.loom/`:
 daemon:
   host: "127.0.0.1"
   port: 8732
+  proxy: "http://127.0.0.1:7890"   # Optional: HTTP/SOCKS proxy
 
 agent:
   max_concurrent: 3
@@ -166,20 +198,70 @@ paths:
   credentials_dir: "~/.loom/credentials"
 ```
 
+### Policy Rules
+
+Policies route envelopes to agent sessions. Bundled defaults are shipped with Loom; user rules in `~/.loom/policies/` take priority.
+
+```yaml
+# ~/.loom/policies/my-project.yaml
+rules:
+  - name: "vllm project issues"
+    match:
+      source: github
+      source_id_pattern: "vllm-project/vllm#"
+    action:
+      priority: 2
+      prompt: "prompt_github_issue"     # Bundled or custom template name
+      model: sonnet                      # Override model
+      max_turns: 5                       # Limit agent turns
+      skills: ["vllm-expert"]            # SDK skills to inject
+      cwd: "/path/to/local/vllm/clone"   # Agent working directory
+      auto_approve: false
+```
+
+Match fields: `source`, `labels`, `source_id_pattern` (regex), `title_pattern` (regex).
+
+### Prompt Templates
+
+Three-layer resolution (last wins):
+
+1. **Bundled**: `loom/prompts/*.md` (shipped with the package)
+2. **User**: `~/.loom/prompts/*.md` (overrides bundled)
+3. **Per-source**: `~/.loom/prompts/<source>/<name>.md` (e.g. `github/acme-app.md`)
+
+Templates use Python format syntax with envelope fields: `{source}`, `{title}`, `{body}`, `{labels}`, `{source_id}`, `{metadata[user]}`, `{metadata[html_url]}`, etc. Missing metadata keys produce empty strings instead of errors.
+
 ## CLI Reference
 
 ```
+# Daemon management
+loom daemon                                   # Start daemon (background)
+loom daemon -f                                # Start daemon (foreground)
+loom up                                       # Alias for `loom daemon`
+loom down                                     # Stop daemon
+
+# Mailbox / Agent control
+loom agent on                                 # Enable agent processing + drain pending
+loom agent off                                # Pause agent (mailbox keeps collecting)
+loom agent status                             # Show agent state
+loom mailbox on                               # Start adaptors (collect envelopes)
+loom mailbox off                              # Stop adaptors (agent keeps processing)
+loom mailbox status                           # Show adaptor state
+
+# Envelope operations
 loom inbox [--source github] [--status pending] [--limit 20]
 loom show <envelope_id>
 loom approve <envelope_id>
 loom reject <envelope_id> [--reason "..."]
-loom daemon                                   # Start daemon (background)
-loom daemon -f                                # Start daemon (foreground)
-loom status                                   # Queue backlog + daemon status
-loom doctor                                   # Diagnose local setup
+
+# Source management
 loom source add github --repo owner/repo [--events issues,pull_requests]
 loom source add gmail --credentials path/to/secrets.json
 loom source list
+
+# System
+loom status                                   # Queue backlog + daemon status
+loom doctor                                   # Diagnose local setup
 loom ui                                       # Open web UI in browser
 ```
 
@@ -203,7 +285,7 @@ loom ui                                       # Open web UI in browser
 
 Polls `GET /repos/{owner}/{repo}/issues?since={cursor}` for incremental updates. Designed for local dev machines — no public endpoint or webhook required.
 
-Features: `since` cursor for incremental updates, ETag conditional requests (304 support), rate limit backoff, per-repo polling interval, event type and label filtering, cursor persistence across restarts.
+Features: `since` cursor for incremental updates, ETag conditional requests (304 support), rate limit backoff, per-repo polling interval, event type and label filtering, cursor persistence across restarts, proxy support.
 
 Actions: `comment`, `close`, `label` (add/remove). See [docs/github-example.md](docs/github-example.md) for an end-to-end walkthrough.
 
@@ -211,7 +293,7 @@ Actions: `comment`, `close`, `label` (add/remove). See [docs/github-example.md](
 
 Polls Gmail via Google API with OAuth2 browser-based auth. Token cached locally and auto-refreshed.
 
-Features: configurable query string, APScheduler polling, full MIME body decoding, thread-aware headers, seen-set persistence, proxy support.
+Features: configurable query string, APScheduler polling, full MIME body decoding, thread-aware headers, seen-set persistence, proxy support (HTTP/SOCKS).
 
 Actions: `reply` (with threading headers), `archive`, `label`, `trash`.
 
@@ -235,13 +317,14 @@ pre-commit run --all-files
 | Module | Status | Tests |
 |---|---|---|
 | Core (Envelope, EventBus, Mailbox) | Complete | - |
-| Config system | Complete | 11 |
+| Config system + PID/proxy | Complete | 17 |
 | State Store (SQLite) | Complete | 28 |
 | GitHub adaptor | Complete | 37 |
 | Gmail adaptor | Complete | 22 |
-| Policy Engine | Complete | - |
-| Dispatcher + session completion | Complete | 3 |
-| Session Manager (claude-agent-sdk) | Complete | - |
+| Policy Engine (bundled + user) | Complete | 8 |
+| Dispatcher + agent/mailbox toggle | Complete | 8 |
+| Session Manager (semaphore concurrency) | Complete | 6 |
+| Prompt loading (3-layer) | Complete | 6 |
 | Daemon bootstrap | Complete | 7 |
 | CLI (argparse + Rich) | Complete | 9 |
 | WebUI API routes | Complete | - |
