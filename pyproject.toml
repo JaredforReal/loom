@@ -35,6 +35,8 @@ dependencies = [
     "apscheduler>=3.10",
     # RSS
     "feedparser>=6.0",
+    # arXiv
+    "arxiv>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -60,6 +62,7 @@ github = "loom.adaptor.github:GitHubAdaptor"
 rss = "loom.adaptor.rss:RSSAdaptor"
 gmail = "loom.adaptor.gmail:GmailAdaptor"
 anet = "loom.adaptor.anet:AnetAdaptor"
+arxiv = "loom.adaptor.arxiv:ArxivAdaptor"
 
 [tool.ruff]
 target-version = "py312"

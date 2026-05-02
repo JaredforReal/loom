@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from loom.cli.view.render import doctor_report, envelope_detail, envelope_table, status_bar
 from loom.cli.view.theme import make_console
@@ -219,7 +219,7 @@ def _build_parser() -> argparse.ArgumentParser:
     source_add.add_argument(
         "kind",
         type=str,
-        choices=["github", "rss", "gmail", "anet"],
+        choices=["github", "rss", "gmail", "anet", "arxiv"],
         help="Source kind to add",
     )
     source_add.add_argument(
@@ -264,6 +264,34 @@ def _build_parser() -> argparse.ArgumentParser:
         required=False,
         default=None,
         help="Path to credentials file",
+    )
+    source_add.add_argument(
+        "--query",
+        type=str,
+        required=False,
+        default=None,
+        help="arXiv API query string (e.g. 'cat:cs.AI AND ti:agent')",
+    )
+    source_add.add_argument(
+        "--categories",
+        type=str,
+        required=False,
+        default=None,
+        help="arXiv categories, comma-separated (e.g. cs.AI,cs.CL)",
+    )
+    source_add.add_argument(
+        "--keywords",
+        type=str,
+        required=False,
+        default=None,
+        help="Title keywords, comma-separated (e.g. LLM,agent)",
+    )
+    source_add.add_argument(
+        "--max-results",
+        type=int,
+        required=False,
+        default=50,
+        help="Max papers per poll for arxiv (default 50)",
     )
     source_add.add_argument(
         "--token",
@@ -547,6 +575,8 @@ def cmd_source_add(args: argparse.Namespace) -> None:
         _add_rss_source(config, args)
     elif args.kind == "anet":
         _add_anet_source(config, args)
+    elif args.kind == "arxiv":
+        _add_arxiv_source(config, args)
     save_config(config)
 
 
@@ -615,6 +645,26 @@ def _add_anet_source(config: LoomConfig, args: argparse.Namespace) -> None:
     print("Anet source saved to config.")
 
 
+def _add_arxiv_source(config: LoomConfig, args: argparse.Namespace) -> None:
+    if not args.query and not args.categories and not args.keywords:
+        _die("At least one of --query, --categories, or --keywords is required for arxiv sources")
+    source: dict[str, Any] = {
+        "kind": "arxiv",
+        "poll_interval": args.interval,
+        "max_results": args.max_results,
+    }
+    if args.query:
+        source["query"] = args.query
+    if args.categories:
+        source["categories"] = [c.strip() for c in args.categories.split(",")]
+    if args.keywords:
+        source["keywords"] = [k.strip() for k in args.keywords.split(",")]
+    config.sources.append(source)
+    desc = args.query or f"cats={args.categories} kw={args.keywords}"
+    print(f"arxiv source saved: {desc} (interval={args.interval}s, max={args.max_results})")
+    print("Run `loom daemon` to start monitoring.")
+
+
 def _describe_source(src: dict[str, object]) -> str:
     kind = src.get("kind")
     if kind == "github":
@@ -623,6 +673,10 @@ def _describe_source(src: dict[str, object]) -> str:
         return f"Gmail ({src.get('query', 'is:unread')})"
     if kind == "rss":
         return str(src.get("url", "unknown"))
+    if kind == "arxiv":
+        q = src.get("query", "")
+        cats = ",".join(src.get("categories", []))  # type: ignore[arg-type]
+        return f"arxiv: {q or cats}"
     return str(src)
 
 
@@ -693,6 +747,10 @@ def _check_one_source(src: dict[str, object]) -> tuple[str, bool, str]:
     if kind == "rss":
         url = str(src.get("url", ""))
         return (f"rss · {url}", bool(url), url or "no url")
+    if kind == "arxiv":
+        has_q = bool(src.get("query") or src.get("categories") or src.get("keywords"))
+        label = f"arxiv · {src.get('query', 'category/keyword search')}"
+        return (label, has_q, "query configured" if has_q else "no query/categories/keywords")
     if kind == "anet":
         return ("anet peer", True, str(src.get("peer", "(local)")))
     return (f"{kind} source", False, "unknown kind")
