@@ -138,6 +138,18 @@ class TestSourcesEndpoint:
         assert body[0]["kind"] == "github"
         assert "unread" in body[0]
 
+    async def test_sources_includes_name(self, client: TestClient, webui_ctx) -> None:
+        webui_ctx.config.sources = [
+            {"kind": "github", "owner": "octocat", "repo": "hello-world"},
+            {"kind": "github", "owner": "acme", "repo": "api"},
+        ]
+        body = client.get("/api/sources").json()
+        assert len(body) == 2
+        assert body[0]["name"] == "octocat/hello-world"
+        assert body[0]["unread"] == 0
+        assert body[1]["name"] == "acme/api"
+        assert body[1]["unread"] == 0
+
     async def test_sources_default_mode_is_active(self, client: TestClient, webui_ctx) -> None:
         webui_ctx.config.sources = [{"kind": "github", "owner": "a", "repo": "b"}]
         body = client.get("/api/sources").json()

@@ -36,6 +36,48 @@ const KNOWN_KINDS = ["github", "gmail", "rss", "arxiv"]
 const KNOWN_MODES = ["active", "fetch-only", "paused"]
 const SOURCE_COMMON_FIELDS = new Set(["kind", "group", "mode"])
 
+interface SourceFieldDef {
+  key: string
+  label: string
+  type: "text" | "number" | "select" | "tags"
+  options?: string[]
+  default?: string | number
+  placeholder?: string
+}
+
+const SOURCE_FIELDS: Record<string, SourceFieldDef[]> = {
+  github: [
+    { key: "owner", label: "Owner", type: "text", placeholder: "octocat" },
+    { key: "repo", label: "Repo", type: "text", placeholder: "hello-world" },
+    { key: "poll_interval", label: "Poll interval (s)", type: "number", default: 120 },
+    { key: "state", label: "State", type: "select", options: ["all", "open", "closed"], default: "all" },
+  ],
+  rss: [
+    { key: "url", label: "Feed URL", type: "text", placeholder: "https://example.com/feed.xml" },
+    { key: "poll_interval", label: "Poll interval (s)", type: "number", default: 300 },
+  ],
+  arxiv: [
+    { key: "categories", label: "Categories", type: "tags", placeholder: "cs.AI, cs.CL" },
+    { key: "keywords", label: "Keywords", type: "tags", placeholder: "LLM, reasoning" },
+    { key: "query", label: "Query (override)", type: "text", placeholder: "cat:cs.AI AND ti:agent" },
+    { key: "poll_interval", label: "Poll interval (s)", type: "number", default: 43200 },
+    { key: "max_results", label: "Max results", type: "number", default: 50 },
+  ],
+  gmail: [
+    { key: "query", label: "Gmail query", type: "text", default: "is:unread -in:chats newer_than:1d" },
+    { key: "poll_seconds", label: "Poll interval (s)", type: "number", default: 30 },
+  ],
+}
+
+function sourceDefaults(kind: string): Record<string, unknown> & { kind: string } {
+  const fields = SOURCE_FIELDS[kind] ?? []
+  const obj: Record<string, unknown> & { kind: string } = { kind }
+  for (const f of fields) {
+    if (f.default !== undefined) obj[f.key] = f.default
+  }
+  return obj
+}
+
 function parseConfig(content: string): ConfigShape | { error: string } {
   if (!content.trim()) {
     return emptyConfig()
@@ -306,17 +348,31 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
         <Card
           title="Sources"
           action={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                const next = [...config.sources, { kind: "github" }]
-                update({ ...config, sources: next })
-              }}
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              Add
-            </Button>
+            <div className="flex items-center gap-1">
+              <select
+                id="source-kind-select"
+                defaultValue="github"
+                className={cn(inputCls, "h-8 w-auto text-xs")}
+              >
+                {KNOWN_KINDS.map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const sel = document.getElementById("source-kind-select") as HTMLSelectElement
+                  const kind = sel?.value ?? "github"
+                  const defaults = sourceDefaults(kind)
+                  const next = [...config.sources, defaults]
+                  update({ ...config, sources: next })
+                }}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Add
+              </Button>
+            </div>
           }
         >
           {config.sources.length === 0 ? (
@@ -339,8 +395,7 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
                   }}
                   defaultExpanded={
                     i === config.sources.length - 1 &&
-                    s.kind === "github" &&
-                    Object.keys(s).length === 1
+                    Object.keys(s).filter((k) => !SOURCE_COMMON_FIELDS.has(k) && s[k] !== undefined && s[k] !== "").length === 0
                   }
                 />
               ))}
@@ -366,7 +421,29 @@ function SourceCard({
   defaultExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
-  const extraEntries = Object.entries(source).filter(([k]) => !SOURCE_COMMON_FIELDS.has(k))
+  const schemaFields = SOURCE_FIELDS[source.kind] ?? []
+  const schemaKeys = new Set(schemaFields.map((f) => f.key))
+  const extraEntries = Object.entries(source).filter(
+    ([k]) => !SOURCE_COMMON_FIELDS.has(k) && !schemaKeys.has(k),
+  )
+
+  const handleKindChange = (newKind: string) => {
+    const newDefaults = sourceDefaults(newKind)
+    const preserved: Record<string, unknown> & { kind: string } = { kind: newKind }
+    if (source.group !== undefined) preserved.group = source.group
+    if (source.mode !== undefined) preserved.mode = source.mode
+    onChange({ ...newDefaults, ...preserved })
+  }
+
+  const setField = (key: string, value: unknown) => {
+    const next = { ...source }
+    if (value === "" || value === undefined || value === null) {
+      delete next[key]
+    } else {
+      next[key] = value
+    }
+    onChange(next)
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -405,7 +482,7 @@ function SourceCard({
             <Field label="Kind">
               <select
                 value={source.kind}
-                onChange={(e) => onChange({ ...source, kind: e.target.value })}
+                onChange={(e) => handleKindChange(e.target.value)}
                 className={inputCls}
               >
                 {KNOWN_KINDS.map((k) => (
@@ -447,6 +524,13 @@ function SourceCard({
                 ))}
               </select>
             </Field>
+
+            {/* Schema-driven fields for the current source kind */}
+            {schemaFields.map((f) => (
+              <SourceField key={f.key} def={f} value={source[f.key]} onChange={(v) => setField(f.key, v)} />
+            ))}
+
+            {/* Any extra keys not covered by the schema */}
             {extraEntries.map(([k, v]) => (
               <Field key={k} label={k}>
                 <input
@@ -463,6 +547,85 @@ function SourceCard({
         </div>
       )}
     </div>
+  )
+}
+
+function SourceField({
+  def,
+  value,
+  onChange,
+}: {
+  def: SourceFieldDef
+  value: unknown
+  onChange: (v: unknown) => void
+}) {
+  if (def.type === "select") {
+    return (
+      <Field label={def.label}>
+        <select
+          value={String(value ?? def.default ?? "")}
+          onChange={(e) => onChange(e.target.value || undefined)}
+          className={inputCls}
+        >
+          {(def.options ?? []).map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+      </Field>
+    )
+  }
+
+  if (def.type === "number") {
+    return (
+      <Field label={def.label}>
+        <input
+          type="number"
+          value={value !== undefined ? String(value) : (def.default ?? "")}
+          onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
+          className={inputCls}
+        />
+      </Field>
+    )
+  }
+
+  if (def.type === "tags") {
+    // YAML list → comma-separated string for editing
+    const str = Array.isArray(value)
+      ? value.join(", ")
+      : typeof value === "string" && value !== ""
+        ? value
+        : String(def.default ?? "")
+    return (
+      <Field label={def.label}>
+        <input
+          type="text"
+          value={str}
+          placeholder={def.placeholder}
+          onChange={(e) => {
+            const raw = e.target.value
+            if (raw === "") {
+              onChange(undefined)
+            } else {
+              onChange(raw.split(",").map((s) => s.trim()).filter(Boolean))
+            }
+          }}
+          className={inputCls}
+        />
+      </Field>
+    )
+  }
+
+  // Default: text
+  return (
+    <Field label={def.label}>
+      <input
+        type="text"
+        value={String(value ?? def.default ?? "")}
+        placeholder={def.placeholder}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        className={inputCls}
+      />
+    </Field>
   )
 }
 

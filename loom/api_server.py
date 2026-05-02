@@ -76,9 +76,43 @@ async def get_status():
 
 
 @app.get("/api/envelopes")
-async def list_envelopes(source: str | None = None, group: str | None = None, limit: int = 50):
+async def list_envelopes(
+    source: str | None = None,
+    group: str | None = None,
+    source_id_prefix: str | None = None,
+    limit: int = 50,
+):
     ctx = _ctx()
-    envelopes = await ctx.mailbox.list_envelopes(source=source, group=group, limit=limit)
+
+    # When filtering by group, resolve to source_id_prefixes from current config
+    # so moving sources in/out of groups takes immediate effect.
+    if group is not None:
+        prefixes: list[str] = []
+        for src in ctx.config.sources:
+            if src.get("group") != group:
+                continue
+            kind = src.get("kind", "")
+            if kind == "github" and "owner" in src and "repo" in src:
+                prefixes.append(f"{src['owner']}/{src['repo']}")
+        if prefixes:
+            envelopes = await ctx.store.query_envelopes(
+                source_id_prefixes=prefixes,
+                limit=limit,
+            )
+            return [_envelope_to_dict(e) for e in envelopes]
+        # Fallback to group field if no prefixes resolved
+        envelopes = await ctx.mailbox.list_envelopes(
+            group=group,
+            limit=limit,
+        )
+        return [_envelope_to_dict(e) for e in envelopes]
+
+    envelopes = await ctx.mailbox.list_envelopes(
+        source=source,
+        group=group,
+        source_id_prefix=source_id_prefix,
+        limit=limit,
+    )
     return [_envelope_to_dict(e) for e in envelopes]
 
 
@@ -201,13 +235,30 @@ async def get_envelope_session(envelope_id: str):
 @app.get("/api/sources")
 async def list_sources():
     ctx = _ctx()
-    counts = await ctx.mailbox.get_unread_count()
+    group_counts = await ctx.store.get_unread_counts_by_group()
     result = []
     for src in ctx.config.sources:
         kind = src.get("kind", "unknown")
         entry = dict(src)
         entry.setdefault("mode", "active")
-        entry["unread"] = counts.get(kind, 0)
+
+        # Compute display name from source-specific fields
+        if kind == "github" and "owner" in src and "repo" in src:
+            entry["name"] = f"{src['owner']}/{src['repo']}"
+        elif kind == "rss" and "url" in src:
+            from urllib.parse import urlparse
+
+            entry["name"] = urlparse(src["url"]).hostname or src["url"]
+        elif kind == "arxiv":
+            cats = src.get("categories", [])
+            entry["name"] = ", ".join(cats) if cats else src.get("query", kind)[:60]
+        else:
+            entry["name"] = kind
+
+        # Unread count: use explicit group if set, else match by name
+        # (daemon auto-assigns name as group on envelopes)
+        group_key = entry.get("group") or entry.get("name", kind)
+        entry["unread"] = group_counts.get(group_key, 0)
         result.append(entry)
     return result
 
@@ -215,7 +266,7 @@ async def list_sources():
 @app.get("/api/groups")
 async def list_groups():
     ctx = _ctx()
-    counts = await ctx.mailbox.get_unread_count()
+    group_counts = await ctx.store.get_unread_counts_by_group()
     groups: dict[str, dict[str, Any]] = {}
     for src in ctx.config.sources:
         g = src.get("group")
@@ -226,11 +277,24 @@ async def list_groups():
             groups[g] = {
                 "name": g,
                 "sources": [],
-                "unread": 0,
+                "unread": group_counts.get(g, 0),
                 **({"policy": policy} if policy else {}),
             }
-        groups[g]["sources"].append({k: v for k, v in src.items() if k != "group"})
-        groups[g]["unread"] += counts.get(src.get("kind", ""), 0)
+        # Compute display name for the source entry
+        kind = src.get("kind", "unknown")
+        entry = {k: v for k, v in src.items() if k != "group"}
+        if kind == "github" and "owner" in src and "repo" in src:
+            entry["name"] = f"{src['owner']}/{src['repo']}"
+        elif kind == "rss" and "url" in src:
+            from urllib.parse import urlparse
+
+            entry["name"] = urlparse(src["url"]).hostname or src["url"]
+        elif kind == "arxiv":
+            cats = src.get("categories", [])
+            entry["name"] = ", ".join(cats) if cats else src.get("query", kind)[:60]
+        else:
+            entry["name"] = kind
+        groups[g]["sources"].append(entry)
     return list(groups.values())
 
 

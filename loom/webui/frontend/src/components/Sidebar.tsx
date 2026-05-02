@@ -22,8 +22,10 @@ interface SidebarProps {
   onViewChange: (view: View) => void
   sourceFilter: string | null
   groupFilter: string | null
+  sourceIdPrefix: string | null
   onSourceFilter: (source: string | null) => void
   onGroupFilter: (group: string | null) => void
+  onSourceIdPrefix: (prefix: string | null) => void
   showArchived: boolean
   onToggleArchived: () => void
 }
@@ -33,8 +35,10 @@ export function Sidebar({
   onViewChange,
   sourceFilter,
   groupFilter,
+  sourceIdPrefix,
   onSourceFilter,
   onGroupFilter,
+  onSourceIdPrefix,
   showArchived,
   onToggleArchived,
 }: SidebarProps) {
@@ -67,10 +71,11 @@ export function Sidebar({
           <SidebarRow
             icon={<Inbox className="h-4 w-4" />}
             label="All"
-            active={view === "inbox" && sourceFilter === null && groupFilter === null}
+            active={view === "inbox" && sourceFilter === null && groupFilter === null && sourceIdPrefix === null}
             onClick={() => {
               onSourceFilter(null)
               onGroupFilter(null)
+              onSourceIdPrefix(null)
             }}
           />
           {groups.map((g) => {
@@ -120,28 +125,58 @@ export function Sidebar({
                 </button>
                 {isOpen && (
                   <div className="ml-4 flex flex-col">
-                    {g.sources.map((s) => (
-                      <SidebarRow
-                        key={`${g.name}/${s.kind}`}
-                        label={s.kind}
-                        active={view === "inbox" && sourceFilter === s.kind}
-                        onClick={() => onSourceFilter(s.kind)}
-                      />
-                    ))}
+                    {g.sources.map((s) => {
+                      let prefix: string | null = null
+                      if (s.kind === "github" && s.owner && s.repo) {
+                        prefix = `${s.owner}/${s.repo}`
+                      }
+                      return (
+                        <SidebarRow
+                          key={`${g.name}/${s.name || s.kind}`}
+                          label={s.name || s.kind}
+                          active={view === "inbox" && (prefix ? sourceIdPrefix === prefix : groupFilter === g.name)}
+                          onClick={() => {
+                            if (prefix) {
+                              onSourceIdPrefix(prefix)
+                            } else {
+                              onGroupFilter(g.name)
+                            }
+                          }}
+                        />
+                      )
+                    })}
                   </div>
                 )}
               </div>
             )
           })}
-          {ungroupedSources.map((s) => (
-            <SidebarRow
-              key={s.kind}
-              label={s.kind}
-              badge={s.unread || undefined}
-              active={view === "inbox" && sourceFilter === s.kind}
-              onClick={() => onSourceFilter(s.kind)}
-            />
-          ))}
+          {ungroupedSources.map((s) => {
+            // Build source_id_prefix from source-specific fields
+            let prefix: string | null = null
+            if (s.kind === "github" && s.owner && s.repo) {
+              prefix = `${s.owner}/${s.repo}`
+            } else if (s.kind === "rss" && s.url) {
+              prefix = null // RSS doesn't have source_id_prefix filtering
+            }
+            const isActive = view === "inbox" && (
+              prefix ? sourceIdPrefix === prefix : sourceFilter === s.kind
+            )
+            return (
+              <SidebarRow
+                key={s.name || s.kind}
+                label={s.name || s.kind}
+                badge={s.unread || undefined}
+                active={isActive}
+                onClick={() => {
+                  if (prefix) {
+                    onSourceIdPrefix(prefix)
+                  } else {
+                    onSourceFilter(s.kind)
+                  }
+                }}
+              />
+            )
+          })}
         </Section>
 
         <Section title="View">

@@ -158,6 +158,7 @@ def _build_adaptors(
         proxy = _resolve_proxy(config)
         gh = GitHubAdaptor(token=token, proxy=proxy)
         for src in github_sources:
+            default_group = f"{src['owner']}/{src['repo']}"
             gh.add_source(
                 GitHubSourceConfig(
                     owner=src["owner"],
@@ -166,7 +167,7 @@ def _build_adaptors(
                     state=src.get("state", "all"),
                     events=src.get("events", ["issues", "pull_requests"]),
                     labels_filter=src.get("labels_filter"),
-                    group=src.get("group", ""),
+                    group=src.get("group") or default_group,
                 )
             )
         gh.set_callback(mailbox.receive)
@@ -196,15 +197,19 @@ def _build_adaptors(
     # One RSS adaptor handles multiple feeds
     rss_sources = [s for s in sources if s.get("kind") == "rss"]
     if rss_sources:
+        from urllib.parse import urlparse
+
         proxy = _resolve_proxy(config)
         rss = RSSAdaptor(proxy=proxy)
         for src in rss_sources:
+            parsed = urlparse(src["url"])
+            default_group = parsed.hostname or src["url"]
             rss.add_source(
                 RSSSourceConfig(
                     url=src["url"],
                     poll_interval=src.get("poll_interval", 300),
                     title_filter=src.get("title_filter", []),
-                    group=src.get("group", ""),
+                    group=src.get("group") or default_group,
                 )
             )
         rss.set_callback(mailbox.receive)
@@ -215,14 +220,16 @@ def _build_adaptors(
     if arxiv_sources:
         arx = ArxivAdaptor(proxy=_resolve_proxy(config))
         for src in arxiv_sources:
+            cats = src.get("categories", [])
+            default_group = ", ".join(cats) if cats else src.get("query", "arxiv")[:60]
             arx.add_source(
                 ArxivSourceConfig(
                     query=src.get("query", ""),
-                    categories=src.get("categories", []),
+                    categories=cats,
                     keywords=src.get("keywords", []),
                     poll_interval=src.get("poll_interval", 3600),
                     max_results=src.get("max_results", 50),
-                    group=src.get("group", ""),
+                    group=src.get("group") or default_group,
                 )
             )
         arx.set_callback(mailbox.receive)

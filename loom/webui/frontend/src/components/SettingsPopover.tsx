@@ -58,8 +58,8 @@ export function SettingsPopover({ current, onChange }: SettingsPopoverProps) {
         >
           <option value="">All sources</option>
           {sources.map((s) => (
-            <option key={s.kind} value={s.kind}>
-              {s.kind}
+            <option key={s.name || s.kind} value={s.name || s.kind}>
+              {s.name || s.kind}
             </option>
           ))}
         </select>

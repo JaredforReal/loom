@@ -8,10 +8,11 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const getStatus = () => jsonFetch<DaemonStatus>("/api/status")
 
-export const listEnvelopes = (source?: string, group?: string) => {
+export const listEnvelopes = (source?: string, group?: string, sourceIdPrefix?: string) => {
   const params = new URLSearchParams()
   if (source) params.set("source", source)
   if (group) params.set("group", group)
+  if (sourceIdPrefix) params.set("source_id_prefix", sourceIdPrefix)
   params.set("limit", "10000")
   return jsonFetch<Envelope[]>(`/api/envelopes?${params}`)
 }
