@@ -188,7 +188,6 @@ def _build_adaptors(
                 query=src.get("query", "is:unread -in:chats newer_than:1d"),
                 poll_seconds=src.get("poll_seconds", 30),
                 proxy_url=proxy,
-                group=src.get("group", ""),
             )
             gmail.set_callback(mailbox.receive)
             adaptors.append(gmail)
