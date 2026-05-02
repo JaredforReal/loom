@@ -22,10 +22,10 @@ const STATUS_TOKEN: Record<EnvelopeStatus, { bg: string; dot: string; label: str
     dot: "bg-status-processing",
     label: "text-[hsl(var(--status-processing))]",
   },
-  waiting_approval: {
-    bg: "bg-[hsl(var(--status-waiting)/0.08)]",
-    dot: "bg-status-waiting",
-    label: "text-[hsl(var(--status-waiting))]",
+  in_review: {
+    bg: "bg-[hsl(var(--status-review)/0.08)]",
+    dot: "bg-status-review",
+    label: "text-[hsl(var(--status-review))]",
   },
   done: {
     bg: "bg-[hsl(var(--status-done)/0.06)]",

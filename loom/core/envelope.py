@@ -11,7 +11,7 @@ from enum import StrEnum
 class EnvelopeStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
-    WAITING_APPROVAL = "waiting_approval"
+    IN_REVIEW = "in_review"
     DONE = "done"
     DISMISSED = "dismissed"
     FAILED = "failed"

@@ -8,7 +8,7 @@ import { DetailPanel } from "./DetailPanel"
 const COLUMN_DEFS = [
   { title: "Queue", status: "pending" as const },
   { title: "Processing", status: "processing" as const },
-  { title: "Waiting Approval", status: "waiting_approval" as const },
+  { title: "In Review", status: "in_review" as const },
   { title: "Done", status: "done" as const },
 ] as const
 
@@ -31,7 +31,7 @@ export function KanbanBoard({
     const g: Record<EnvelopeStatus, Envelope[]> = {
       pending: [],
       processing: [],
-      waiting_approval: [],
+      in_review: [],
       done: [],
       dismissed: [],
       failed: [],
@@ -73,7 +73,7 @@ export function KanbanBoard({
     () => ({
       pending: grouped.pending,
       processing: grouped.processing,
-      waiting_approval: grouped.waiting_approval,
+      in_review: grouped.in_review,
       done: doneColumn,
     }),
     [grouped, doneColumn]

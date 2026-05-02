@@ -365,7 +365,7 @@ class TestAgentToggle:
         envelope = Envelope(source="github", title="Test")
         await disp._on_new_envelope("new_envelope", envelope)
         policy.evaluate.assert_called_once()
-        mailbox.update_status.assert_called_once()
+        sessions.spawn.assert_called_once()
 
     def test_set_agent_enabled_toggles(self) -> None:
         from unittest.mock import MagicMock

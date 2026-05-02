@@ -119,6 +119,10 @@ class Store:
                 )
             except Exception:
                 pass  # Column already exists
+            # Migrate: rename old status value waiting_approval -> in_review
+            await conn.execute(
+                text("UPDATE envelopes SET status = 'in_review' WHERE status = 'waiting_approval'")
+            )
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         logger.info("Store initialized at %s", self._db_path)
 
@@ -172,7 +176,7 @@ class Store:
             return [_row_to_envelope(r) for r in rows]
 
     async def get_unread_counts(self, source: str | None = None) -> dict[str, int]:
-        """Return {source: count} for pending/waiting_approval envelopes."""
+        """Return {source: count} for pending/in_review envelopes."""
         async with self._session() as session:
             stmt = (
                 select(EnvelopeRow.source, func.count(EnvelopeRow.id))
@@ -180,7 +184,7 @@ class Store:
                     EnvelopeRow.status.in_(
                         [
                             str(EnvelopeStatus.PENDING),
-                            str(EnvelopeStatus.WAITING_APPROVAL),
+                            str(EnvelopeStatus.IN_REVIEW),
                         ]
                     )
                 )
@@ -190,6 +194,22 @@ class Store:
                 stmt = stmt.where(EnvelopeRow.source == source)
             result = await session.execute(stmt)
             return {row[0]: row[1] for row in result.all()}
+
+    async def reset_processing_to_pending(self) -> int:
+        """Reset all PROCESSING envelopes back to PENDING.
+
+        Used at daemon startup to recover envelopes that were mid-processing
+        when the previous daemon instance was killed.
+        """
+        async with self._session() as session:
+            result = await session.execute(
+                text("UPDATE envelopes SET status = 'pending' WHERE status = 'processing'")
+            )
+            await session.commit()
+            count = result.rowcount
+            if count:
+                logger.info("Reset %d stuck PROCESSING envelopes to PENDING", count)
+            return count
 
     async def save_adaptor_state(self, adaptor: str, key: str, value: str) -> None:
         """Persist a key-value pair for an adaptor (cursors, etags, etc.)."""

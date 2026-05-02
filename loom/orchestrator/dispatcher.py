@@ -132,8 +132,6 @@ class Dispatcher:
         if action.priority != envelope.priority:
             envelope.priority = action.priority
 
-        await self._mailbox.update_status(envelope.id, EnvelopeStatus.PROCESSING)
-
         logger.info(
             "Dispatching envelope %s — agent=%s prompt=%s auto_approve=%s",
             envelope.id,
@@ -143,6 +141,7 @@ class Dispatcher:
         )
 
         if action.auto_approve:
+            await self._mailbox.update_status(envelope.id, EnvelopeStatus.PROCESSING)
             await self._dispatch_oneshot(envelope, action)
         else:
             await self._dispatch_interactive(envelope, action)
@@ -276,8 +275,14 @@ class Dispatcher:
         return prompt_template.format_map(context)
 
     # ------------------------------------------------------------------
-    # Session completion callback
+    # Session lifecycle callbacks
     # ------------------------------------------------------------------
+
+    async def handle_session_start(self, session: Session) -> None:
+        """Called when a queued session acquires a semaphore slot and starts running."""
+        if not session.envelope_id:
+            return
+        await self._mailbox.update_status(session.envelope_id, EnvelopeStatus.PROCESSING)
 
     async def handle_session_complete(self, session: Session) -> None:
         """Called by SessionManager when a background session finishes.
@@ -304,10 +309,8 @@ class Dispatcher:
                 envelope.metadata["cli_session_id"] = session.cli_session_id
             if session.cwd:
                 envelope.metadata["session_cwd"] = session.cwd
-            await self._mailbox.save_and_transition(envelope, EnvelopeStatus.WAITING_APPROVAL)
-            logger.info(
-                "Envelope %s -> WAITING_APPROVAL (session %s completed)", envelope.id, session.id
-            )
+            await self._mailbox.save_and_transition(envelope, EnvelopeStatus.IN_REVIEW)
+            logger.info("Envelope %s -> IN_REVIEW (session %s completed)", envelope.id, session.id)
 
         elif session.status == SessionStatus.FAILED:
             envelope.agent_summary = f"Session failed: {session.error}"

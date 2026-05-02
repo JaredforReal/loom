@@ -332,7 +332,8 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         bus, session_mgr, policy_engine, mailbox, agent_enabled=True, config=config
     )
 
-    # Wire session completion callback
+    # Wire session lifecycle callbacks
+    session_mgr._on_start = dispatcher.handle_session_start
     session_mgr._on_complete = dispatcher.handle_session_complete
 
     # --- Adaptors ---
@@ -365,6 +366,9 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     # --- Start components ---
     await dispatcher.start()
     metrics.set_online(True)
+
+    # Recover envelopes stuck in PROCESSING from a previous daemon run
+    await store.reset_processing_to_pending()
 
     # Drain pending envelopes from previous runs (respects semaphore)
     if dispatcher.agent_enabled:
