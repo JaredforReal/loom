@@ -55,11 +55,11 @@ def _envelope_to_dict(e) -> dict:
 @app.get("/api/status")
 async def get_status():
     ctx = _ctx()
-    s = ctx.metrics.snapshot()
+    pending = await ctx.store.query_envelopes(status=EnvelopeStatus.PENDING, limit=10_000)
     return {
-        "online": s.online,
-        "active_sessions": s.active_sessions,
-        "queue_backlog": s.queue_backlog,
+        "online": True,
+        "active_sessions": ctx.session_mgr.active_count,
+        "queue_backlog": len(pending),
     }
 
 
