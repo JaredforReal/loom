@@ -1,0 +1,29 @@
+rules:
+  - name: "Starred emails"
+    match:
+      source: gmail
+      labels: ["STARRED"]
+    action:
+      priority: 3
+      prompt: "prompt_gmail"
+      tools: ["Read", "WebFetch"]
+      auto_approve: false
+
+  - name: "Promotional / newsletter digest"
+    match:
+      source: gmail
+      labels: ["CATEGORY_PROMOTIONS"]
+    action:
+      priority: 0
+      prompt: "prompt_gmail"
+      batch: true
+      batch_window: "6h"
+      auto_approve: true
+
+  - name: "Gmail inbox (general)"
+    match:
+      source: gmail
+    action:
+      priority: 1
+      prompt: "prompt_gmail"
+      auto_approve: false
