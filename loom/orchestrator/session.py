@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 class SessionStatus(StrEnum):
     IDLE = "idle"
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -194,8 +195,7 @@ class SessionManager:
             envelope_id=envelope_id,
             prompt_template=task_prompt[:200],
             system_prompt=effective_system_prompt,
-            status=SessionStatus.RUNNING,
-            started_at=datetime.utcnow(),
+            status=SessionStatus.QUEUED,
             cwd=cwd or os.getcwd(),
         )
         self._sessions[session.id] = session
@@ -203,6 +203,8 @@ class SessionManager:
         # Acquire semaphore before connecting — blocks if at capacity
         async def _guarded_run() -> None:
             async with self._semaphore:
+                session.status = SessionStatus.RUNNING
+                session.started_at = datetime.utcnow()
                 client = ClaudeSDKClient(options=options)
                 session._client = client
                 try:

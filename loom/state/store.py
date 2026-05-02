@@ -191,6 +191,22 @@ class Store:
             result = await session.execute(stmt)
             return {row[0]: row[1] for row in result.all()}
 
+    async def reset_processing_to_pending(self) -> int:
+        """Reset all PROCESSING envelopes back to PENDING.
+
+        Used at daemon startup to recover envelopes that were mid-processing
+        when the previous daemon instance was killed.
+        """
+        async with self._session() as session:
+            result = await session.execute(
+                text("UPDATE envelopes SET status = 'pending' WHERE status = 'processing'")
+            )
+            await session.commit()
+            count = result.rowcount
+            if count:
+                logger.info("Reset %d stuck PROCESSING envelopes to PENDING", count)
+            return count
+
     async def save_adaptor_state(self, adaptor: str, key: str, value: str) -> None:
         """Persist a key-value pair for an adaptor (cursors, etags, etc.)."""
         async with self._session() as session:

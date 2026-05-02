@@ -223,6 +223,35 @@ class TestGetUnreadCounts:
         assert counts == {}
 
 
+class TestResetProcessing:
+    async def test_resets_processing_to_pending(self, store: Store) -> None:
+        env1 = _make_envelope(source_id="#1", status=EnvelopeStatus.PROCESSING)
+        env2 = _make_envelope(source_id="#2", status=EnvelopeStatus.PROCESSING)
+        env3 = _make_envelope(source_id="#3", status=EnvelopeStatus.DONE)
+        await store.save_envelope(env1)
+        await store.save_envelope(env2)
+        await store.save_envelope(env3)
+
+        count = await store.reset_processing_to_pending()
+        assert count == 2
+
+        loaded1 = await store.get_envelope(env1.id)
+        assert loaded1.status == EnvelopeStatus.PENDING
+        loaded2 = await store.get_envelope(env2.id)
+        assert loaded2.status == EnvelopeStatus.PENDING
+        loaded3 = await store.get_envelope(env3.id)
+        assert loaded3.status == EnvelopeStatus.DONE
+
+    async def test_no_processing_returns_zero(self, store: Store) -> None:
+        await store.save_envelope(_make_envelope(status=EnvelopeStatus.PENDING))
+        count = await store.reset_processing_to_pending()
+        assert count == 0
+
+    async def test_empty_store_returns_zero(self, store: Store) -> None:
+        count = await store.reset_processing_to_pending()
+        assert count == 0
+
+
 class TestAdaptorState:
     async def test_save_and_get(self, store: Store) -> None:
         await store.save_adaptor_state("github", "cursor:acme/app", "2024-01-01T00:00:00Z")

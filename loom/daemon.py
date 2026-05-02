@@ -366,6 +366,9 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     await dispatcher.start()
     metrics.set_online(True)
 
+    # Recover envelopes stuck in PROCESSING from a previous daemon run
+    await store.reset_processing_to_pending()
+
     # Drain pending envelopes from previous runs (respects semaphore)
     if dispatcher.agent_enabled:
         dispatcher._start_drain()
