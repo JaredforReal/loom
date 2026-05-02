@@ -10,6 +10,7 @@ from loom.config import (
     DaemonSettings,
     LoomConfig,
     PathSettings,
+    check_pid_file,
     ensure_loom_dirs,
     load_config,
     save_config,
@@ -146,3 +147,53 @@ class TestEnsureLoomDirs:
         ensure_loom_dirs(config)
         ensure_loom_dirs(config)  # no error
         assert (tmp_path / "data").is_dir()
+
+
+class TestProxyConfig:
+    def test_proxy_roundtrip(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.yaml"
+        config = LoomConfig(daemon=DaemonSettings(proxy="http://127.0.0.1:7890"))
+        save_config(config, path=p)
+
+        loaded = load_config(p)
+        assert loaded.daemon.proxy == "http://127.0.0.1:7890"
+
+    def test_proxy_omitted_when_none(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.yaml"
+        config = LoomConfig(daemon=DaemonSettings())
+        save_config(config, path=p)
+
+        data = yaml.safe_load(p.read_text())
+        assert "proxy" not in data["daemon"]
+
+    def test_loads_config_with_proxy(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.yaml"
+        data = {"daemon": {"proxy": "socks5://localhost:1080"}}
+        p.write_text(yaml.dump(data))
+        config = load_config(p)
+        assert config.daemon.proxy == "socks5://localhost:1080"
+
+
+class TestCheckPidFile:
+    def test_returns_none_when_no_file(self, tmp_path: Path) -> None:
+        assert check_pid_file(tmp_path / "nonexistent.pid") is None
+
+    def test_returns_none_for_stale_pid(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "loom.pid"
+        pid_file.write_text("999999999")
+        assert check_pid_file(pid_file) is None
+        assert not pid_file.exists()
+
+    def test_returns_none_for_corrupted_file(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "loom.pid"
+        pid_file.write_text("not-a-number")
+        assert check_pid_file(pid_file) is None
+        assert not pid_file.exists()
+
+    def test_returns_pid_for_running_process(self, tmp_path: Path) -> None:
+        import os
+
+        pid_file = tmp_path / "loom.pid"
+        pid_file.write_text(str(os.getpid()))
+        assert check_pid_file(pid_file) == os.getpid()
+        assert pid_file.exists()  # file kept for running process

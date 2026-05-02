@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import signal
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from loom.config import AgentSettings, DaemonSettings, LoomConfig, PathSettings
-from loom.daemon import DaemonContext, _build_adaptors, get_context, set_context
+from loom.daemon import (
+    DaemonContext,
+    _build_adaptors,
+    _remove_pid,
+    _resolve_proxy,
+    _write_pid,
+    get_context,
+    set_context,
+    setup_logging,
+)
 
 
 def _make_config(tmp_path: Path, sources: list[dict] | None = None) -> LoomConfig:
@@ -170,3 +181,117 @@ class TestCursorPersistence:
 
         assert gh2.get_cursors() == {"acme/app": "2024-01-01T00:00:00Z"}
         await store.close()
+
+
+class TestPidManagement:
+    def test_write_and_remove_pid(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "loom.pid"
+        _write_pid(pid_file)
+        assert pid_file.exists()
+        assert int(pid_file.read_text()) == os.getpid()
+
+        _remove_pid(pid_file)
+        assert not pid_file.exists()
+
+    def test_remove_pid_missing_ok(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "nonexistent.pid"
+        _remove_pid(pid_file)  # should not raise
+
+    def test_write_pid_creates_parent(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "deep" / "nested" / "loom.pid"
+        _write_pid(pid_file)
+        assert pid_file.exists()
+
+
+class TestSetupLogging:
+    def test_file_handler_always_added(self, tmp_path: Path) -> None:
+        log_path = tmp_path / "test.log"
+        setup_logging(log_path, foreground=False)
+
+        loom_logger = logging.getLogger("loom")
+        handler_types = [type(h).__name__ for h in loom_logger.handlers]
+        assert "RotatingFileHandler" in handler_types
+
+        # Cleanup
+        loom_logger.handlers.clear()
+
+    def test_console_handler_only_in_foreground(self, tmp_path: Path) -> None:
+        log_path = tmp_path / "test.log"
+
+        # Background: no console handler
+        setup_logging(log_path, foreground=False)
+        loom_logger = logging.getLogger("loom")
+        handler_types = [type(h).__name__ for h in loom_logger.handlers]
+        assert "StreamHandler" not in handler_types
+        loom_logger.handlers.clear()
+
+        # Foreground: has console handler
+        setup_logging(log_path, foreground=True)
+        loom_logger = logging.getLogger("loom")
+        handler_types = [type(h).__name__ for h in loom_logger.handlers]
+        assert "StreamHandler" in handler_types
+        loom_logger.handlers.clear()
+
+
+class TestResolveProxy:
+    def test_config_proxy_takes_priority(self) -> None:
+        config = _make_config(Path("/tmp"))
+        config.daemon.proxy = "http://config-proxy:8080"
+        with patch.dict(os.environ, {"HTTPS_PROXY": "http://env-proxy:8080"}):
+            assert _resolve_proxy(config) == "http://config-proxy:8080"
+
+    def test_falls_back_to_https_proxy_env(self) -> None:
+        config = _make_config(Path("/tmp"))
+        with patch.dict(os.environ, {"HTTPS_PROXY": "http://env-proxy:8080"}, clear=False):
+            assert _resolve_proxy(config) == "http://env-proxy:8080"
+
+    def test_falls_back_to_http_proxy_env(self) -> None:
+        config = _make_config(Path("/tmp"))
+        env = {"HTTP_PROXY": "http://env-proxy:8080"}
+        with patch.dict(os.environ, env, clear=False):
+            # Make sure HTTPS_PROXY is not set
+            os.environ.pop("HTTPS_PROXY", None)
+            os.environ.pop("https_proxy", None)
+            assert _resolve_proxy(config) == "http://env-proxy:8080"
+
+    def test_returns_none_when_nothing_set(self) -> None:
+        config = _make_config(Path("/tmp"))
+        with patch.dict(os.environ, {}, clear=False):
+            for key in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+                os.environ.pop(key, None)
+            assert _resolve_proxy(config) is None
+
+
+class TestPortConflict:
+    async def test_port_in_use_causes_exit(self, tmp_loom_dir: Path) -> None:
+        # Bind to a port to occupy it
+        import socket
+
+        from loom.daemon import run_daemon
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.listen(1)
+
+        config = _make_config(tmp_loom_dir)
+        config.daemon.port = port
+
+        with pytest.raises(SystemExit, match="1"):
+            await run_daemon(config)
+
+        sock.close()
+
+
+class TestDuplicateDaemon:
+    async def test_refuses_when_pid_exists(self, tmp_loom_dir: Path) -> None:
+        from loom.daemon import run_daemon
+
+        config = _make_config(tmp_loom_dir)
+        pid_path = config.paths.data_dir / "loom.pid"
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text(str(os.getpid()))
+
+        with pytest.raises(SystemExit, match="1"):
+            await run_daemon(config)

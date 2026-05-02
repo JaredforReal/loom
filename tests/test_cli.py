@@ -176,3 +176,57 @@ class TestDoctor:
         code, out = _run(["doctor"], capsys)
         assert code == 1
         assert "config.yaml" in out
+
+
+# ---------------------------------------------------------------------------
+# up / down
+# ---------------------------------------------------------------------------
+
+
+class TestDaemonUp:
+    def test_up_rejects_when_already_running(
+        self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import os
+
+        pid_path = isolated_loom / "data" / "loom.pid"
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text(str(os.getpid()))
+
+        code, out = _run(["up"], capsys)
+        assert code == 1
+        assert "already running" in out
+
+    def test_daemon_rejects_when_already_running(
+        self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import os
+
+        pid_path = isolated_loom / "data" / "loom.pid"
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text(str(os.getpid()))
+
+        code, out = _run(["daemon"], capsys)
+        assert code == 1
+        assert "already running" in out
+
+
+class TestDaemonDown:
+    def test_down_when_not_running(
+        self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, out = _run(["down"], capsys)
+        assert code == 0
+        assert "not running" in out
+
+    def test_down_removes_stale_pid(
+        self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        pid_path = isolated_loom / "data" / "loom.pid"
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text("999999999")
+
+        code, out = _run(["down"], capsys)
+        assert code == 0
+        assert "not running" in out or "stale" in out
+        assert not pid_path.exists()
