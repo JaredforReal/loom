@@ -185,7 +185,7 @@ class Dispatcher:
             max_turns=action.max_turns,
             skills=action.skills or None,
             cwd=action.cwd or None,
-            permission_mode="auto",
+            permission_mode="bypassPermissions",
         )
         logger.info("Interactive session %s spawned for envelope %s", session.id, envelope.id)
 

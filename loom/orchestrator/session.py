@@ -157,7 +157,7 @@ class SessionManager:
             "Never execute actions directly. Always present your analysis for user approval."
         )
 
-        effective_permission_mode = permission_mode or "auto"
+        effective_permission_mode = permission_mode or "bypassPermissions"
 
         options = ClaudeAgentOptions(
             system_prompt=effective_system_prompt,
