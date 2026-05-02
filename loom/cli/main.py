@@ -548,14 +548,13 @@ def cmd_up(args: argparse.Namespace) -> None:
     pid_path = cfg.paths.data_dir / "loom.pid"
     dist = Path(__file__).parent.parent / "webui" / "dist"
 
+    if check_pid_file(pid_path) is not None:
+        url = f"http://{cfg.daemon.host}:{cfg.daemon.port}"
+        print(f"Opening {url} ...")
+        webbrowser.open(url)
+        return
+
     if not dist.is_dir():
-        # Restart any running daemon so it picks up the fresh build
-        if (existing_pid := check_pid_file(pid_path)) is not None:
-            os.kill(existing_pid, signal.SIGTERM)
-            for _ in range(20):
-                time.sleep(0.3)
-                if check_pid_file(pid_path) is None:
-                    break
         frontend = Path(__file__).parent.parent / "webui" / "frontend"
         print("Building frontend...")
         r = subprocess.run(["npm", "run", "build"], cwd=frontend)

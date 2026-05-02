@@ -184,7 +184,7 @@ class TestDoctor:
 
 
 class TestDaemonUp:
-    def test_up_rejects_when_already_running(
+    def test_up_opens_browser_when_already_running(
         self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         import os
@@ -194,8 +194,8 @@ class TestDaemonUp:
         pid_path.write_text(str(os.getpid()))
 
         code, out = _run(["up"], capsys)
-        assert code == 1
-        assert "already running" in out
+        assert code == 0
+        assert "Opening" in out
 
     def test_daemon_rejects_when_already_running(
         self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]
