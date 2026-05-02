@@ -168,6 +168,7 @@ class TestNormalize:
         assert envelope.metadata["kind"] == "issue"
         assert envelope.metadata["user"] == "alice"
         assert envelope.metadata["html_url"] == "https://github.com/acme/app/issues/42"
+        assert envelope.metadata["label_colors"] == {}
 
     @pytest.mark.asyncio
     async def test_normalize_pr(self):
@@ -225,6 +226,23 @@ class TestNormalize:
 
         assert envelope.metadata["assignees"] == ["dev1", "dev2"]
         assert envelope.metadata["milestone"] == "v2.0"
+
+    @pytest.mark.asyncio
+    async def test_normalize_preserves_label_colors(self):
+        adaptor = _make_adaptor()
+        raw = _make_issue(
+            labels=[
+                {"name": "bug", "color": "d73a4a"},
+                {"name": "P0", "color": "b60205"},
+                {"name": "no-color"},
+            ]
+        )
+
+        envelope = await adaptor.normalize(raw)
+
+        assert envelope.metadata["label_colors"] == {"bug": "d73a4a", "P0": "b60205"}
+        assert "bug" in envelope.labels
+        assert "no-color" in envelope.labels
 
     @pytest.mark.asyncio
     async def test_normalize_reactions_count(self):
