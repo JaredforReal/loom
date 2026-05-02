@@ -276,6 +276,7 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     # Check port availability
     try:
         test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         test_sock.settimeout(1)
         test_sock.bind((config.daemon.host, config.daemon.port))
         test_sock.close()
@@ -359,6 +360,8 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     ctx.adaptors = started_adaptors
 
     # --- Uvicorn (API server) ---
+    import loom.webui.app  # noqa: F401 — side-effect: mounts built frontend if dist/ present
+
     uv_config = uvicorn.Config(
         app,
         host=config.daemon.host,

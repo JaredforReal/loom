@@ -148,15 +148,8 @@ def _build_parser() -> argparse.ArgumentParser:
     daemon.set_defaults(func=cmd_daemon)
 
     # ---- up ----
-    up = commands.add_parser("up", help="Start the Loom daemon (alias for 'daemon').")
-    up.add_argument(
-        "-f",
-        "--foreground",
-        action="store_true",
-        default=False,
-        help="Run in foreground (block terminal).",
-    )
-    up.set_defaults(func=cmd_daemon)
+    up = commands.add_parser("up", help="Build frontend, start daemon, open web UI.")
+    up.set_defaults(func=cmd_up)
 
     # ---- down ----
     down = commands.add_parser("down", help="Stop the Loom daemon.")
@@ -415,15 +408,16 @@ def cmd_down(args: argparse.Namespace) -> None:
         print(f"Error: No permission to signal PID {pid}", file=sys.stderr)
         raise SystemExit(1)
 
-    # Wait for process to exit (up to 5s)
+    # Wait up to 5s for graceful exit, then force-kill
     for _ in range(50):
         time.sleep(0.1)
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
-            print(f"Daemon stopped (PID {pid})")
+            print(f"Daemon stopped (PID {pid}) — web UI offline")
             return
-    print(f"Warning: Daemon (PID {pid}) did not exit within 5s", file=sys.stderr)
+    os.kill(pid, signal.SIGKILL)
+    print(f"Daemon force-killed (PID {pid}) — web UI offline")
 
 
 # ------------------------------------------------------------------
@@ -548,15 +542,61 @@ def cmd_status(args: argparse.Namespace) -> None:
         console.print("  daemon: not running", style="loom.muted")
 
 
-def cmd_ui(args: argparse.Namespace) -> None:
-    """Open the Loom web UI in a browser."""
+def cmd_up(args: argparse.Namespace) -> None:
+    """Build frontend (once), start daemon, open web UI."""
     cfg = load_config()
+    pid_path = cfg.paths.data_dir / "loom.pid"
+    dist = Path(__file__).parent.parent / "webui" / "dist"
+
+    if not dist.is_dir():
+        # Restart any running daemon so it picks up the fresh build
+        if (existing_pid := check_pid_file(pid_path)) is not None:
+            os.kill(existing_pid, signal.SIGTERM)
+            for _ in range(20):
+                time.sleep(0.3)
+                if check_pid_file(pid_path) is None:
+                    break
+        frontend = Path(__file__).parent.parent / "webui" / "frontend"
+        print("Building frontend...")
+        r = subprocess.run(["npm", "run", "build"], cwd=frontend)
+        if r.returncode != 0:
+            print("Error: frontend build failed.", file=sys.stderr)
+            raise SystemExit(1)
+
+    if check_pid_file(pid_path) is None:
+        log_path = cfg.paths.data_dir / "loom.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_path, "a")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "loom.daemon"],
+            stdout=log_file,
+            stderr=log_file,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        time.sleep(0.5)
+        if proc.poll() is not None:
+            print(f"Error: daemon exited. Check {log_path}", file=sys.stderr)
+            raise SystemExit(1)
+        print(f"Daemon started (PID {proc.pid})")
+        time.sleep(1.5)
+
     url = f"http://{cfg.daemon.host}:{cfg.daemon.port}"
     print(f"Opening {url} ...")
-    try:
-        webbrowser.open(url)
-    except Exception as exc:
-        print(f"  (could not open browser: {exc})")
+    webbrowser.open(url)
+
+
+def cmd_ui(args: argparse.Namespace) -> None:
+    """Open the Loom web UI in the browser."""
+    cfg = load_config()
+    pid_path = cfg.paths.data_dir / "loom.pid"
+    dist = Path(__file__).parent.parent / "webui" / "dist"
+    if not dist.is_dir() or check_pid_file(pid_path) is None:
+        print("Loom is not running. Use `loom up` to start.", file=sys.stderr)
+        raise SystemExit(1)
+    url = f"http://{cfg.daemon.host}:{cfg.daemon.port}"
+    print(f"Opening {url} ...")
+    webbrowser.open(url)
 
 
 # ------------------------------------------------------------------
