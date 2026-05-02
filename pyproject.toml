@@ -74,6 +74,9 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require real SDK/API calls",
+]
 
 [tool.mypy]
 python_version = "3.12"
