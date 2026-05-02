@@ -1,2 +1,10 @@
 __pycache__
 .env
+loom/webui/src/node_modules/
+loom/webui/dist/
+loom/webui/src/**/*.tsbuildinfo
+loom/webui/src/vite.config.js
+loom/webui/src/vite.config.d.ts
+
+.playwright-mcp/
+*.png

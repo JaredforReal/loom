@@ -279,6 +279,34 @@ loom ui                                       # Open web UI in browser
 | PUT | `/api/settings/policies/{name}` | Save policy file |
 | GET | `/api/settings/prompts` | List prompt templates |
 
+## Web UI
+
+A left sidebar + 4-column kanban board (Queue · Processing · Waiting Approval · Done) with a right-side detail drawer. Built with Vite + React + TypeScript + Tailwind + shadcn/ui. GitHub label colors are rendered natively in cards; PR/issue bodies are rendered as markdown in the drawer. Source lives at `loom/webui/src/`, build output at `loom/webui/dist/`.
+
+### Build for production (served by the daemon)
+
+```bash
+cd loom/webui/src
+npm install
+npm run build                   # emits ../dist/
+cd ../../..
+loom daemon                     # serves the SPA at http://127.0.0.1:8732
+loom ui                         # opens the browser
+```
+
+### Dev mode (hot reload)
+
+```bash
+# terminal A
+loom daemon                     # REST API on :8732
+
+# terminal B
+cd loom/webui/src
+npm run dev                     # Vite on :5173, proxies /api → :8732
+```
+
+Open `http://localhost:5173` during development.
+
 ## Adaptors
 
 ### GitHub (REST API Polling)

@@ -258,6 +258,11 @@ class GitHubAdaptor(BaseAdaptor):
 
         # Build labels list
         labels = [lbl["name"] for lbl in item.get("labels", [])]
+        label_colors: dict[str, str] = {
+            lbl["name"]: lbl["color"]
+            for lbl in item.get("labels", [])
+            if lbl.get("name") and lbl.get("color")
+        }
         if is_pr:
             labels.append("pr")
         else:
@@ -303,6 +308,7 @@ class GitHubAdaptor(BaseAdaptor):
                 else 0,
                 "assignees": [a.get("login", "") for a in item.get("assignees", [])],
                 "milestone": (item.get("milestone") or {}).get("title", ""),
+                "label_colors": label_colors,
             },
         )
 
