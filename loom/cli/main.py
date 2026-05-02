@@ -10,7 +10,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import signal
+import subprocess
 import sys
+import time
 import webbrowser
 from collections import Counter
 from collections.abc import AsyncIterator
@@ -21,7 +24,7 @@ from typing import NoReturn
 
 from loom.cli.view.render import doctor_report, envelope_detail, envelope_table, status_bar
 from loom.cli.view.theme import make_console
-from loom.config import DEFAULT_LOOM_DIR, LoomConfig, load_config, save_config
+from loom.config import DEFAULT_LOOM_DIR, LoomConfig, check_pid_file, load_config, save_config
 from loom.core.envelope import Envelope, EnvelopeStatus
 from loom.core.eventbus import EventBus
 from loom.core.mailbox import Mailbox
@@ -133,7 +136,29 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ---- daemon ----
     daemon = commands.add_parser("daemon", help="Start the Loom daemon.")
+    daemon.add_argument(
+        "-f",
+        "--foreground",
+        action="store_true",
+        default=False,
+        help="Run in foreground (block terminal). Default: run in background.",
+    )
     daemon.set_defaults(func=cmd_daemon)
+
+    # ---- up ----
+    up = commands.add_parser("up", help="Start the Loom daemon (alias for 'daemon').")
+    up.add_argument(
+        "-f",
+        "--foreground",
+        action="store_true",
+        default=False,
+        help="Run in foreground (block terminal).",
+    )
+    up.set_defaults(func=cmd_daemon)
+
+    # ---- down ----
+    down = commands.add_parser("down", help="Stop the Loom daemon.")
+    down.set_defaults(func=cmd_down)
 
     # ---- status ----
     status = commands.add_parser("status", help="Show queue backlog and envelope status counts.")
@@ -268,25 +293,87 @@ def cmd_reject(args: argparse.Namespace) -> None:
 
 def cmd_daemon(args: argparse.Namespace) -> None:
     """Start the Loom daemon (mailbox + dispatcher + web UI)."""
-    print("Starting Loom daemon...")
-    os.execvp(sys.executable, [sys.executable, "-m", "loom.daemon"])
+    config = load_config()
+    pid_path = config.paths.data_dir / "loom.pid"
+    log_path = config.paths.data_dir / "loom.log"
+
+    existing_pid = check_pid_file(pid_path)
+    if existing_pid is not None:
+        print(f"Error: Daemon already running (PID {existing_pid})", file=sys.stderr)
+        raise SystemExit(1)
+
+    config.paths.data_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.foreground:
+        os.execvp(
+            sys.executable,
+            [sys.executable, "-m", "loom.daemon", "--foreground"],
+        )
+    else:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_path, "a")
+
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "loom.daemon"],
+            stdout=log_file,
+            stderr=log_file,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        time.sleep(0.5)
+        if proc.poll() is not None:
+            print(
+                f"Error: Daemon process exited immediately (code {proc.returncode}). "
+                f"Check {log_path} for details.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+
+        print(f"Loom daemon started (PID {proc.pid})")
+        print(f"  Log: {log_path}")
+        print(f"  PID: {pid_path}")
+
+
+def cmd_down(args: argparse.Namespace) -> None:
+    """Stop the Loom daemon."""
+    config = load_config()
+    pid_path = config.paths.data_dir / "loom.pid"
+    pid = check_pid_file(pid_path)
+    if pid is None:
+        print("Daemon is not running.")
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pid_path.unlink(missing_ok=True)
+        print("Daemon is not running (stale PID file removed).")
+        return
+    except PermissionError:
+        print(f"Error: No permission to signal PID {pid}", file=sys.stderr)
+        raise SystemExit(1)
+
+    # Wait for process to exit (up to 5s)
+    for _ in range(50):
+        time.sleep(0.1)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            print(f"Daemon stopped (PID {pid})")
+            return
+    print(f"Warning: Daemon (PID {pid}) did not exit within 5s", file=sys.stderr)
 
 
 def cmd_status(args: argparse.Namespace) -> None:
     """Show queue backlog and envelope status counts."""
     config = load_config()
     pid_path = config.paths.data_dir / "loom.pid"
-    online = False
     daemon_info = {"online": False, "active_sessions": 0, "queue_backlog": 0}
 
-    if pid_path.exists():
-        try:
-            pid = int(pid_path.read_text().strip())
-            os.kill(pid, 0)
-            online = True
-            daemon_info["online"] = True
-        except (ProcessLookupError, ValueError):
-            pass
+    pid = check_pid_file(pid_path)
+    online = pid is not None
+    if online:
+        daemon_info["online"] = True
 
     counts = asyncio.run(_load_status_counts())
     backlog = counts.get(str(EnvelopeStatus.PENDING), 0) + counts.get(
