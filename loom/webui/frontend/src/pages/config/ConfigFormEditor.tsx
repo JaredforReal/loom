@@ -3,6 +3,7 @@ import yaml from "js-yaml"
 import { ChevronRight, Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { savePolicy } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface ConfigFormEditorProps {
@@ -112,6 +113,16 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
     const serialized = serializeConfig(next)
     lastEmittedRef.current = serialized
     onChange(serialized)
+  }
+
+  const addGroup = (name: string) => {
+    if (!name || config.groups[name] !== undefined) return
+    const policyName = `${name}_policy`
+    const policyFile = `${policyName}.yaml`
+    const template = `prompt: \nmodel: sonnet\nauto_approve: false\n`
+    savePolicy(policyFile, template).catch(() => {})
+    update({ ...config, groups: { ...config.groups, [name]: policyName } })
+    setNewGroupName("")
   }
 
   if ("error" in parsed) {
@@ -317,10 +328,7 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
                 onChange={(e) => setNewGroupName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key !== "Enter") return
-                  const name = newGroupName.trim()
-                  if (!name || config.groups[name] !== undefined) return
-                  update({ ...config, groups: { ...config.groups, [name]: "" } })
-                  setNewGroupName("")
+                  addGroup(newGroupName.trim())
                 }}
                 placeholder="New group name…"
                 className={cn(inputCls, "flex-1")}
@@ -328,12 +336,7 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  const name = newGroupName.trim()
-                  if (!name || config.groups[name] !== undefined) return
-                  update({ ...config, groups: { ...config.groups, [name]: "" } })
-                  setNewGroupName("")
-                }}
+                onClick={() => addGroup(newGroupName.trim())}
               >
                 <Plus className="h-3.5 w-3.5" />
               </Button>

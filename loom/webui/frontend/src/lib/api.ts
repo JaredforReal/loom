@@ -46,3 +46,10 @@ export const getEnvelopeSession = (id: string) =>
 export const listSources = () => jsonFetch<Source[]>("/api/sources")
 
 export const listGroups = () => jsonFetch<GroupSummary[]>("/api/groups")
+
+export const savePolicy = (name: string, content: string) =>
+  jsonFetch<{ saved: boolean }>(`/api/settings/policies/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  })
