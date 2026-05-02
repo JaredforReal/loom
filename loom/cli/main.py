@@ -591,9 +591,42 @@ def cmd_ui(args: argparse.Namespace) -> None:
     cfg = load_config()
     pid_path = cfg.paths.data_dir / "loom.pid"
     dist = Path(__file__).parent.parent / "webui" / "dist"
-    if not dist.is_dir() or check_pid_file(pid_path) is None:
-        print("Loom is not running. Use `loom up` to start.", file=sys.stderr)
+
+    if check_pid_file(pid_path) is None:
+        print("Daemon is not running. Use `loom up` to start.", file=sys.stderr)
         raise SystemExit(1)
+
+    if not dist.is_dir():
+        # Daemon is running but frontend was never built — build it then restart
+        existing_pid = check_pid_file(pid_path)
+        os.kill(existing_pid, signal.SIGTERM)
+        for _ in range(20):
+            time.sleep(0.3)
+            if check_pid_file(pid_path) is None:
+                break
+        frontend = Path(__file__).parent.parent / "webui" / "frontend"
+        print("Building frontend...")
+        r = subprocess.run(["npm", "run", "build"], cwd=frontend)
+        if r.returncode != 0:
+            print("Error: frontend build failed.", file=sys.stderr)
+            raise SystemExit(1)
+        log_path = cfg.paths.data_dir / "loom.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_path, "a")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "loom.daemon"],
+            stdout=log_file,
+            stderr=log_file,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        time.sleep(0.5)
+        if proc.poll() is not None:
+            print(f"Error: daemon exited. Check {log_path}", file=sys.stderr)
+            raise SystemExit(1)
+        print(f"Daemon restarted (PID {proc.pid})")
+        time.sleep(1.5)
+
     url = f"http://{cfg.daemon.host}:{cfg.daemon.port}"
     print(f"Opening {url} ...")
     webbrowser.open(url)
