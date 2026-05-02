@@ -145,6 +145,30 @@ class PolicyEngine:
                 )
             )
 
+    def load_action_by_name(self, name: str, policy_dir: Path) -> PolicyAction | None:
+        """Load a flat policy file (action fields only, no rules wrapper) by name."""
+        path = policy_dir / f"{name}.yaml"
+        if not path.exists():
+            return None
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        if not data or not isinstance(data, dict):
+            return None
+        return PolicyAction(
+            priority=data.get("priority", 1),
+            agent=data.get("agent", ""),
+            prompt=data.get("prompt", ""),
+            auto_approve=data.get("auto_approve", False),
+            batch=data.get("batch", False),
+            batch_window=data.get("batch_window", ""),
+            tools=data.get("tools", []),
+            max_turns=data.get("max_turns"),
+            system_prompt=data.get("system_prompt", ""),
+            model=data.get("model", ""),
+            skills=data.get("skills", []),
+            cwd=data.get("cwd", ""),
+        )
+
     def evaluate(self, envelope) -> PolicyAction | None:
         """Return the first matching rule's action, or None."""
         for rule in self._rules:

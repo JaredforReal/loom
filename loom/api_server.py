@@ -6,13 +6,17 @@ and external consumers (CLI commands, web frontend, future integrations).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shlex
+import signal
 import stat
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -20,6 +24,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from loom.config import (
+    RESTART_REQUIRED_FIELDS,
+    diff_config,
+    load_config,
+)
 from loom.core.envelope import EnvelopeStatus
 
 logger = logging.getLogger(__name__)
@@ -213,12 +222,12 @@ async def list_groups():
         if not g:
             continue
         if g not in groups:
-            gcfg = ctx.config.groups.get(g)
+            policy = ctx.config.groups.get(g)
             groups[g] = {
                 "name": g,
                 "sources": [],
                 "unread": 0,
-                **({"prompt": gcfg.prompt, "model": gcfg.model} if gcfg else {}),
+                **({"policy": policy} if policy else {}),
             }
         groups[g]["sources"].append({k: v for k, v in src.items() if k != "group"})
         groups[g]["unread"] += counts.get(src.get("kind", ""), 0)
@@ -233,27 +242,15 @@ async def get_group(name: str, limit: int = 50):
         for src in ctx.config.sources
         if src.get("group") == name
     ]
-    if not sources and name not in ctx.config.groups:
+    policy = ctx.config.groups.get(name)
+    if not sources and policy is None:
         return {"error": "not found"}
-    gcfg = ctx.config.groups.get(name)
     envelopes = await ctx.mailbox.list_envelopes(group=name, limit=limit)
     return {
         "name": name,
         "sources": sources,
         "envelopes": [_envelope_to_dict(e) for e in envelopes],
-        **(
-            {
-                "prompt": gcfg.prompt,
-                "system_prompt": gcfg.system_prompt,
-                "model": gcfg.model,
-                "skills": gcfg.skills,
-                "tools": gcfg.tools,
-                "max_turns": gcfg.max_turns,
-                "auto_approve": gcfg.auto_approve,
-            }
-            if gcfg
-            else {}
-        ),
+        **({"policy": policy} if policy else {}),
     }
 
 
@@ -501,6 +498,109 @@ async def reload_prompts():
     ctx = _ctx()
     ctx.session_mgr.reload_prompts()
     return {"templates": len(ctx.session_mgr.list_template_names())}
+
+
+# --- Settings: Config (config.yaml) ---
+
+
+def _config_path() -> Path:
+    from loom import config as _cfg
+
+    return _cfg.DEFAULT_LOOM_DIR / "config.yaml"
+
+
+@app.get("/api/settings/config")
+async def get_config():
+    """Return raw config.yaml content."""
+    path = _config_path()
+    content = path.read_text() if path.exists() else ""
+    return {"path": str(path), "content": content}
+
+
+@app.put("/api/settings/config")
+async def save_config_endpoint(request: Request):
+    """Save config.yaml, hot-reload safe fields, return list of fields needing restart."""
+    ctx = _ctx()
+    body = await request.json()
+    content = body.get("content", "")
+    if not isinstance(content, str):
+        return JSONResponse(status_code=400, content={"error": "content must be a string"})
+
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        return JSONResponse(status_code=400, content={"error": f"invalid YAML: {exc}"})
+    if data is not None and not isinstance(data, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "config must be a YAML object at the top level"},
+        )
+
+    # Persist to disk first so load_config() reads the new content
+    path = _config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+
+    old_config = ctx.config
+    new_config = load_config()
+    changed = diff_config(old_config, new_config)
+
+    # Hot-swap ctx.config so subsequent envelopes use new groups, etc.
+    ctx.config = new_config
+
+    restart_required = [k for k in changed if k in RESTART_REQUIRED_FIELDS]
+    return {
+        "saved": True,
+        "changed": changed,
+        "restart_required": restart_required,
+    }
+
+
+@app.post("/api/settings/config/reload")
+async def reload_config_endpoint():
+    """Reload ctx.config from disk without writing — useful after manual edits."""
+    ctx = _ctx()
+    old_config = ctx.config
+    new_config = load_config()
+    changed = diff_config(old_config, new_config)
+    ctx.config = new_config
+    restart_required = [k for k in changed if k in RESTART_REQUIRED_FIELDS]
+    return {"changed": changed, "restart_required": restart_required}
+
+
+# --- Daemon control ---
+
+
+@app.post("/api/daemon/restart")
+async def restart_daemon():
+    """Schedule a daemon restart: spawn a detached child that waits for this
+    process to exit, then starts a new ``python -m loom.daemon``. Then SIGTERM
+    self for a graceful shutdown."""
+    ctx = _ctx()
+    log_path = ctx.config.paths.data_dir / "loom.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path = ctx.config.paths.data_dir / "loom.pid"
+
+    # The relauncher waits for the PID file to be removed (graceful shutdown
+    # cleans it up), then starts a new daemon. Run in a new session so it
+    # outlives the parent.
+    relauncher = (
+        f"while [ -f {pid_path} ]; do sleep 0.2; done; exec {sys.executable} -m loom.daemon"
+    )
+    log_file = open(log_path, "a")
+    subprocess.Popen(
+        ["sh", "-c", relauncher],
+        stdout=log_file,
+        stderr=log_file,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+        env={**os.environ},
+    )
+
+    # Trigger graceful shutdown of the current process shortly after responding.
+    loop = asyncio.get_event_loop()
+    loop.call_later(0.3, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    return {"restarting": True}
 
 
 # --- Agent / Mailbox control ---

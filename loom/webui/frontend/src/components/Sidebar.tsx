@@ -1,8 +1,19 @@
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Archive, FileText, Inbox, Settings as SettingsIcon } from "lucide-react"
+import {
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Folder,
+  FolderOpen,
+  Inbox,
+  Settings as SettingsIcon,
+  SlidersHorizontal,
+} from "lucide-react"
 
 import type { View } from "@/App"
-import { listSources } from "@/lib/api"
+import { listGroups, listSources } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { SettingsPopover } from "./SettingsPopover"
 
@@ -10,7 +21,9 @@ interface SidebarProps {
   view: View
   onViewChange: (view: View) => void
   sourceFilter: string | null
+  groupFilter: string | null
   onSourceFilter: (source: string | null) => void
+  onGroupFilter: (group: string | null) => void
   showArchived: boolean
   onToggleArchived: () => void
 }
@@ -19,7 +32,9 @@ export function Sidebar({
   view,
   onViewChange,
   sourceFilter,
+  groupFilter,
   onSourceFilter,
+  onGroupFilter,
   showArchived,
   onToggleArchived,
 }: SidebarProps) {
@@ -28,6 +43,17 @@ export function Sidebar({
     queryFn: listSources,
     refetchInterval: 15_000,
   })
+  const { data: groups = [] } = useQuery({
+    queryKey: ["groups"],
+    queryFn: listGroups,
+    refetchInterval: 15_000,
+  })
+
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const toggle = (name: string) =>
+    setExpanded((prev) => ({ ...prev, [name]: !prev[name] }))
+
+  const ungroupedSources = sources.filter((s) => !s.group)
 
   return (
     <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-border bg-muted/20">
@@ -41,10 +67,73 @@ export function Sidebar({
           <SidebarRow
             icon={<Inbox className="h-4 w-4" />}
             label="All"
-            active={view === "inbox" && sourceFilter === null}
-            onClick={() => onSourceFilter(null)}
+            active={view === "inbox" && sourceFilter === null && groupFilter === null}
+            onClick={() => {
+              onSourceFilter(null)
+              onGroupFilter(null)
+            }}
           />
-          {sources.map((s) => (
+          {groups.map((g) => {
+            const isOpen = expanded[g.name] ?? true
+            const isActive = view === "inbox" && groupFilter === g.name
+            return (
+              <div key={g.name} className="flex flex-col">
+                <button
+                  type="button"
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  )}
+                  onClick={() => {
+                    onGroupFilter(g.name)
+                    if (!isOpen) toggle(g.name)
+                  }}
+                >
+                  <span
+                    role="button"
+                    aria-label={isOpen ? "Collapse" : "Expand"}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggle(g.name)
+                    }}
+                    className="flex h-4 w-4 shrink-0 items-center justify-center"
+                  >
+                    {isOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    )}
+                  </span>
+                  {isOpen ? (
+                    <FolderOpen className="h-3.5 w-3.5" />
+                  ) : (
+                    <Folder className="h-3.5 w-3.5" />
+                  )}
+                  <span className="flex-1 truncate">{g.name}</span>
+                  {g.unread > 0 && (
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {g.unread}
+                    </span>
+                  )}
+                </button>
+                {isOpen && (
+                  <div className="ml-4 flex flex-col">
+                    {g.sources.map((s) => (
+                      <SidebarRow
+                        key={`${g.name}/${s.kind}`}
+                        label={s.kind}
+                        active={view === "inbox" && sourceFilter === s.kind}
+                        onClick={() => onSourceFilter(s.kind)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {ungroupedSources.map((s) => (
             <SidebarRow
               key={s.kind}
               label={s.kind}
@@ -65,6 +154,12 @@ export function Sidebar({
         </Section>
 
         <Section title="Configure">
+          <SidebarRow
+            icon={<SlidersHorizontal className="h-4 w-4" />}
+            label="Config"
+            active={view === "config"}
+            onClick={() => onViewChange("config")}
+          />
           <SidebarRow
             icon={<SettingsIcon className="h-4 w-4" />}
             label="Policies"
@@ -116,7 +211,7 @@ function SidebarRow({ icon, label, badge, active, onClick }: SidebarRowProps) {
         "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
         active
           ? "bg-accent text-accent-foreground"
-          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
       )}
     >
       {icon ?? <span className="inline-block h-1.5 w-1.5 rounded-full bg-current opacity-60" />}

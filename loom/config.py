@@ -37,25 +37,11 @@ class PathSettings:
 
 
 @dataclass
-class GroupConfig:
-    """Shared policy defaults for a named collection of sources."""
-
-    name: str
-    prompt: str = ""
-    system_prompt: str = ""
-    skills: list[str] = field(default_factory=list)
-    tools: list[str] = field(default_factory=list)
-    model: str = ""
-    max_turns: int | None = None
-    auto_approve: bool = False
-
-
-@dataclass
 class LoomConfig:
     daemon: DaemonSettings = field(default_factory=DaemonSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
     sources: list[dict[str, Any]] = field(default_factory=list)
-    groups: dict[str, GroupConfig] = field(default_factory=dict)
+    groups: dict[str, str] = field(default_factory=dict)
     paths: PathSettings = field(default_factory=PathSettings)
 
 
@@ -112,10 +98,11 @@ def load_config(path: Path | None = None) -> LoomConfig:
         if isinstance(s, dict) and "kind" in s:
             sources.append(_expand_paths(s))
 
-    groups = {}
-    for name, gcfg in raw.get("groups", {}).items():
-        if isinstance(gcfg, dict):
-            groups[name] = GroupConfig(name=name, **gcfg)
+    groups = {
+        name: str(policy)
+        for name, policy in raw.get("groups", {}).items()
+        if isinstance(policy, str)
+    }
 
     return LoomConfig(daemon=daemon, agent=agent, sources=sources, groups=groups, paths=paths)
 
@@ -140,22 +127,7 @@ def save_config(config: LoomConfig, path: Path | None = None) -> None:
         "sources": config.sources,
     }
     if config.groups:
-        data["groups"] = {
-            name: {
-                k: v
-                for k, v in {
-                    "prompt": g.prompt,
-                    "system_prompt": g.system_prompt,
-                    "skills": g.skills,
-                    "tools": g.tools,
-                    "model": g.model,
-                    "max_turns": g.max_turns,
-                    "auto_approve": g.auto_approve,
-                }.items()
-                if v  # omit empty/falsy defaults
-            }
-            for name, g in config.groups.items()
-        }
+        data["groups"] = dict(config.groups)
     data["paths"] = {
         "policies_dir": str(config.paths.policies_dir),
         "prompts_dir": str(config.paths.prompts_dir),
@@ -178,6 +150,29 @@ def ensure_loom_dirs(config: LoomConfig) -> None:
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
+
+
+# Top-level config fields that cannot be hot-reloaded — adaptors are constructed
+# once at startup, the uvicorn server binds host/port at startup, the session
+# manager's semaphore is sized once, and path changes affect components holding
+# directory references. Changes to these require a daemon restart.
+RESTART_REQUIRED_FIELDS = {"daemon", "agent", "sources", "paths"}
+
+
+def diff_config(old: LoomConfig, new: LoomConfig) -> list[str]:
+    """Return top-level config fields that changed between old and new."""
+    changed: list[str] = []
+    if old.daemon != new.daemon:
+        changed.append("daemon")
+    if old.agent != new.agent:
+        changed.append("agent")
+    if old.sources != new.sources:
+        changed.append("sources")
+    if old.groups != new.groups:
+        changed.append("groups")
+    if old.paths != new.paths:
+        changed.append("paths")
+    return changed
 
 
 def check_pid_file(pid_path: Path) -> int | None:

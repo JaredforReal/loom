@@ -16,7 +16,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from loom.config import GroupConfig, LoomConfig
+from loom.config import LoomConfig
 from loom.core.envelope import Envelope, EnvelopeStatus
 from loom.core.eventbus import EventBus
 from loom.orchestrator.policy import PolicyAction, PolicyEngine
@@ -111,19 +111,11 @@ class Dispatcher:
         """Evaluate envelope against policy and dispatch if matched."""
         action = self._policy.evaluate(envelope)
 
-        # Fallback: use group defaults if no policy rule matched
+        # Fallback: load group's linked policy file if no rule matched
         if action is None and envelope.group and self._config:
-            grp: GroupConfig | None = self._config.groups.get(envelope.group)
-            if grp and (grp.prompt or grp.system_prompt or grp.auto_approve):
-                action = PolicyAction(
-                    prompt=grp.prompt,
-                    system_prompt=grp.system_prompt,
-                    skills=grp.skills,
-                    tools=grp.tools,
-                    model=grp.model,
-                    max_turns=grp.max_turns,
-                    auto_approve=grp.auto_approve,
-                )
+            policy_name = self._config.groups.get(envelope.group)
+            if policy_name and self._policy.policy_dir:
+                action = self._policy.load_action_by_name(policy_name, self._policy.policy_dir)
 
         if action is None:
             logger.info("No matching policy rule for envelope %s — skipping", envelope.id)
