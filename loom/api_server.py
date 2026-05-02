@@ -332,11 +332,81 @@ async def reload_policies():
 
 @app.get("/api/settings/prompts")
 async def get_prompts():
+    """List all prompts — both user-editable and bundled (read-only)."""
     ctx = _ctx()
-    prompt_dir = ctx.config.paths.prompts_dir
-    if not prompt_dir.exists():
-        return []
-    return [{"name": p.stem, "path": str(p)} for p in sorted(prompt_dir.glob("*.md"))]
+    user_dir = ctx.config.paths.prompts_dir
+    bundled_dir = ctx.session_mgr.bundled_prompt_dir
+    result: list[dict[str, Any]] = []
+    if user_dir.exists():
+        for p in sorted(user_dir.glob("*.md")):
+            result.append({"name": p.name, "source": "user", "content": p.read_text()})
+    if bundled_dir and bundled_dir.exists():
+        for p in sorted(bundled_dir.glob("*.md")):
+            result.append({"name": p.name, "source": "bundled", "content": p.read_text()})
+    return result
+
+
+def _is_safe_prompt_name(name: str) -> bool:
+    if "/" in name or "\\" in name or ".." in name:
+        return False
+    return name.endswith(".md")
+
+
+@app.get("/api/settings/prompts/{name}")
+async def get_prompt(name: str):
+    """Return the content of a single prompt file (user or bundled)."""
+    if not _is_safe_prompt_name(name):
+        return JSONResponse(status_code=400, content={"error": "invalid prompt name"})
+    ctx = _ctx()
+    user_path = ctx.config.paths.prompts_dir / name
+    if user_path.exists():
+        return {"name": name, "source": "user", "content": user_path.read_text()}
+    bundled_dir = ctx.session_mgr.bundled_prompt_dir
+    if bundled_dir:
+        bundled_path = bundled_dir / name
+        if bundled_path.exists():
+            return {"name": name, "source": "bundled", "content": bundled_path.read_text()}
+    return JSONResponse(status_code=404, content={"error": "not found"})
+
+
+@app.put("/api/settings/prompts/{name}")
+async def save_prompt(name: str, request: Request):
+    """Save a user prompt and hot-reload the session manager's templates."""
+    if not _is_safe_prompt_name(name):
+        return JSONResponse(status_code=400, content={"error": "invalid prompt name"})
+    ctx = _ctx()
+    body = await request.json()
+    content = body.get("content", "")
+    if not isinstance(content, str):
+        return JSONResponse(status_code=400, content={"error": "content must be a string"})
+
+    path = ctx.config.paths.prompts_dir / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    ctx.session_mgr.reload_prompts()
+    return {"saved": name, "templates": len(ctx.session_mgr.list_template_names())}
+
+
+@app.delete("/api/settings/prompts/{name}")
+async def delete_prompt(name: str):
+    """Delete a user prompt and hot-reload. Bundled prompts cannot be deleted."""
+    if not _is_safe_prompt_name(name):
+        return JSONResponse(status_code=400, content={"error": "invalid prompt name"})
+    ctx = _ctx()
+    path = ctx.config.paths.prompts_dir / name
+    if not path.exists():
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    path.unlink()
+    ctx.session_mgr.reload_prompts()
+    return {"deleted": name, "templates": len(ctx.session_mgr.list_template_names())}
+
+
+@app.post("/api/settings/prompts/reload")
+async def reload_prompts():
+    """Manually trigger a reload of prompt templates."""
+    ctx = _ctx()
+    ctx.session_mgr.reload_prompts()
+    return {"templates": len(ctx.session_mgr.list_template_names())}
 
 
 # --- Agent / Mailbox control ---

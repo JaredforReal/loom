@@ -10,7 +10,7 @@ import { EnvelopeDrawer } from "@/components/EnvelopeDrawer"
 import { StatusBar } from "@/components/StatusBar"
 import { SettingsPage } from "@/pages/SettingsPage"
 
-type View = "inbox" | "settings"
+export type View = "inbox" | "policies" | "prompts"
 
 export default function App() {
   const [view, setView] = useState<View>("inbox")
@@ -50,7 +50,7 @@ export default function App() {
               onSelect={setSelectedId}
             />
           ) : (
-            <SettingsPage />
+            <SettingsPage view={view} />
           )}
         </main>
         <StatusBar />

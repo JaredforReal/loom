@@ -93,6 +93,8 @@ class SessionManager:
 
     def _load_prompt_templates(self) -> None:
         """Load prompt templates: bundled defaults -> user overrides -> per-source."""
+        self._templates.clear()
+
         # Layer 1: Bundled defaults from the package
         if self._bundled_prompt_dir and self._bundled_prompt_dir.exists():
             for path in sorted(self._bundled_prompt_dir.glob("*.md")):
@@ -112,6 +114,22 @@ class SessionManager:
                         self._templates[f"{source_dir.name}/{path.stem}"] = path.read_text()
 
         logger.info("Loaded %d prompt templates", len(self._templates))
+
+    def reload_prompts(self) -> None:
+        """Re-read all prompt template files into the in-memory cache."""
+        self._load_prompt_templates()
+
+    @property
+    def prompt_dir(self) -> Path:
+        return self._prompt_dir
+
+    @property
+    def bundled_prompt_dir(self) -> Path | None:
+        return self._bundled_prompt_dir
+
+    def list_template_names(self) -> list[str]:
+        """Return all loaded template names (for API consumers)."""
+        return sorted(self._templates.keys())
 
     def get_prompt_template(self, name: str) -> str:
         """Resolve a prompt template by name (e.g. 'prompt_github_critical_issue')."""

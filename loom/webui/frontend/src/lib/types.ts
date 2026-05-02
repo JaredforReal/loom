@@ -100,3 +100,19 @@ export interface PolicyDeleteResponse {
   deleted: string
   rules: number
 }
+
+export interface PromptSummary {
+  name: string
+  source: "user" | "bundled"
+  content: string
+}
+
+export interface PromptSaveResponse {
+  saved: string
+  templates: number
+}
+
+export interface PromptDeleteResponse {
+  deleted: string
+  templates: number
+}
