@@ -1,0 +1,8 @@
+rules:
+  - name: "arXiv papers"
+    match:
+      source: arxiv
+    action:
+      priority: 1
+      prompt: "prompt_arxiv"
+      auto_approve: false
