@@ -98,6 +98,23 @@ class TestBuildAdaptors:
         assert adaptors[0].name == "gmail"
         await store.close()
 
+    async def test_builds_arxiv_adaptor(self, tmp_loom_dir: Path) -> None:
+        from loom.core.eventbus import EventBus
+        from loom.core.mailbox import Mailbox
+        from loom.state.store import Store
+
+        store = Store(db_path=tmp_loom_dir / "data" / "test.db")
+        await store.init()
+        mailbox = Mailbox(store, EventBus())
+        config = _make_config(tmp_loom_dir)
+
+        sources = [{"kind": "arxiv", "categories": ["cs.AI"]}]
+        adaptors = _build_adaptors(sources, mailbox, config)
+
+        assert len(adaptors) == 1
+        assert adaptors[0].name == "arxiv"
+        await store.close()
+
     async def test_empty_sources(self, tmp_loom_dir: Path) -> None:
         from loom.core.eventbus import EventBus
         from loom.core.mailbox import Mailbox

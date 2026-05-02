@@ -19,6 +19,7 @@ from pathlib import Path
 
 import uvicorn
 
+from loom.adaptor.arxiv import ArxivAdaptor, ArxivSourceConfig
 from loom.adaptor.base import BaseAdaptor
 from loom.adaptor.github import GitHubAdaptor, GitHubSourceConfig
 from loom.adaptor.rss import RSSAdaptor, RSSSourceConfig
@@ -206,10 +207,27 @@ def _build_adaptors(
         rss.set_callback(mailbox.receive)
         adaptors.append(rss)
 
+    # One arxiv adaptor handles multiple queries
+    arxiv_sources = [s for s in sources if s.get("kind") == "arxiv"]
+    if arxiv_sources:
+        arx = ArxivAdaptor(proxy=_resolve_proxy(config))
+        for src in arxiv_sources:
+            arx.add_source(
+                ArxivSourceConfig(
+                    query=src.get("query", ""),
+                    categories=src.get("categories", []),
+                    keywords=src.get("keywords", []),
+                    poll_interval=src.get("poll_interval", 3600),
+                    max_results=src.get("max_results", 50),
+                )
+            )
+        arx.set_callback(mailbox.receive)
+        adaptors.append(arx)
+
     # Stub adaptors
     for src in sources:
         kind = src.get("kind", "")
-        if kind not in ("github", "gmail", "rss"):
+        if kind not in ("github", "gmail", "rss", "arxiv"):
             logger.warning("Adaptor kind '%s' is not yet implemented, skipping", kind)
 
     return adaptors
