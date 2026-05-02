@@ -1,4 +1,4 @@
-import type { DaemonStatus, Envelope, Source } from "./types"
+import type { DaemonStatus, Envelope, GroupSummary, Source } from "./types"
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
@@ -8,9 +8,10 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const getStatus = () => jsonFetch<DaemonStatus>("/api/status")
 
-export const listEnvelopes = (source?: string) => {
+export const listEnvelopes = (source?: string, group?: string) => {
   const params = new URLSearchParams()
   if (source) params.set("source", source)
+  if (group) params.set("group", group)
   params.set("limit", "10000")
   return jsonFetch<Envelope[]>(`/api/envelopes?${params}`)
 }
@@ -43,3 +44,5 @@ export const getEnvelopeSession = (id: string) =>
   )
 
 export const listSources = () => jsonFetch<Source[]>("/api/sources")
+
+export const listGroups = () => jsonFetch<GroupSummary[]>("/api/groups")

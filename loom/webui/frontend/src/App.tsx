@@ -9,19 +9,21 @@ import { KanbanBoard } from "@/components/KanbanBoard"
 import { StatusBar } from "@/components/StatusBar"
 import { SettingsPage } from "@/pages/SettingsPage"
 
-export type View = "inbox" | "policies" | "prompts"
+export type View = "inbox" | "policies" | "prompts" | "config"
 
 export default function App() {
   const [view, setView] = useState<View>("inbox")
   const [sourceFilter, setSourceFilter] = useState<string | null>(() =>
     getDefaultSource()
   )
+  const [groupFilter, setGroupFilter] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
 
   const { data: envelopes = [] } = useQuery({
-    queryKey: ["envelopes", sourceFilter],
-    queryFn: () => listEnvelopes(sourceFilter ?? undefined),
+    queryKey: ["envelopes", sourceFilter, groupFilter],
+    queryFn: () =>
+      listEnvelopes(sourceFilter ?? undefined, groupFilter ?? undefined),
     refetchInterval: 7_000,
     enabled: view === "inbox",
   })
@@ -32,8 +34,15 @@ export default function App() {
         view={view}
         onViewChange={setView}
         sourceFilter={sourceFilter}
+        groupFilter={groupFilter}
         onSourceFilter={(src) => {
           setSourceFilter(src)
+          setGroupFilter(null)
+          setView("inbox")
+        }}
+        onGroupFilter={(grp) => {
+          setGroupFilter(grp)
+          setSourceFilter(null)
           setView("inbox")
         }}
         showArchived={showArchived}

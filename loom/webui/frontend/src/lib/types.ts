@@ -39,7 +39,16 @@ export interface DaemonStatus {
 export interface Source {
   kind: string
   unread: number
+  group?: string
   [k: string]: unknown
+}
+
+export interface GroupSummary {
+  name: string
+  sources: Array<Record<string, unknown> & { kind: string }>
+  unread: number
+  prompt?: string
+  model?: string
 }
 
 export interface PolicySummary {
@@ -115,4 +124,15 @@ export interface PromptSaveResponse {
 export interface PromptDeleteResponse {
   deleted: string
   templates: number
+}
+
+export interface ConfigFile {
+  path: string
+  content: string
+}
+
+export interface ConfigSaveResponse {
+  saved: boolean
+  changed: string[]
+  restart_required: string[]
 }
