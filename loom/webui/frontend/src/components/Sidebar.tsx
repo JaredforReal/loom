@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
-import { Archive, Inbox } from "lucide-react"
+import { Archive, Inbox, Settings as SettingsIcon } from "lucide-react"
 
 import { listSources } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { SettingsPopover } from "./SettingsPopover"
 
 interface SidebarProps {
+  view: "inbox" | "settings"
+  onViewChange: (view: "inbox" | "settings") => void
   sourceFilter: string | null
   onSourceFilter: (source: string | null) => void
   showArchived: boolean
@@ -13,6 +15,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  view,
+  onViewChange,
   sourceFilter,
   onSourceFilter,
   showArchived,
@@ -36,7 +40,7 @@ export function Sidebar({
           <SidebarRow
             icon={<Inbox className="h-4 w-4" />}
             label="All"
-            active={sourceFilter === null}
+            active={view === "inbox" && sourceFilter === null}
             onClick={() => onSourceFilter(null)}
           />
           {sources.map((s) => (
@@ -44,7 +48,7 @@ export function Sidebar({
               key={s.kind}
               label={s.kind}
               badge={s.unread || undefined}
-              active={sourceFilter === s.kind}
+              active={view === "inbox" && sourceFilter === s.kind}
               onClick={() => onSourceFilter(s.kind)}
             />
           ))}
@@ -56,6 +60,15 @@ export function Sidebar({
             label={showArchived ? "Hide archived" : "Show archived"}
             active={showArchived}
             onClick={onToggleArchived}
+          />
+        </Section>
+
+        <Section title="Configure">
+          <SidebarRow
+            icon={<SettingsIcon className="h-4 w-4" />}
+            label="Policies"
+            active={view === "settings"}
+            onClick={() => onViewChange("settings")}
           />
         </Section>
       </nav>

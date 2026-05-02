@@ -31,8 +31,9 @@ Example policy file::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -71,14 +72,32 @@ class PolicyEngine:
 
     def __init__(self, policy_dir: Path | None = None, bundled_dir: Path | None = None) -> None:
         self._rules: list[PolicyRule] = []
+        self._policy_dir: Path | None = policy_dir
+        self._bundled_dir: Path | None = bundled_dir
         if policy_dir:
             self.load_policies(policy_dir, bundled_dir)
+
+    @property
+    def policy_dir(self) -> Path | None:
+        return self._policy_dir
+
+    @property
+    def bundled_dir(self) -> Path | None:
+        return self._bundled_dir
+
+    def reload(self) -> None:
+        """Reload from the originally configured directories."""
+        if self._policy_dir is None:
+            return
+        self.load_policies(self._policy_dir, self._bundled_dir)
 
     def load_policies(self, policy_dir: Path, bundled_dir: Path | None = None) -> None:
         """Load policies: bundled defaults first, then user overrides.
 
         User rules are prepended so they match before bundled defaults.
         """
+        self._policy_dir = policy_dir
+        self._bundled_dir = bundled_dir
         self._rules.clear()
 
         bundled_rules: list[PolicyRule] = []
@@ -132,6 +151,10 @@ class PolicyEngine:
             if self._matches(rule, envelope):
                 return rule.action
         return None
+
+    def list_rules(self) -> list[dict[str, Any]]:
+        """Return parsed rules as plain dicts (for API consumers)."""
+        return [{"name": r.name, "match": r.match, "action": asdict(r.action)} for r in self._rules]
 
     def _matches(self, rule: PolicyRule, envelope) -> bool:
         match = rule.match

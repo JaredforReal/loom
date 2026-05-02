@@ -9,8 +9,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+import yaml
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from loom.core.envelope import EnvelopeStatus
 
@@ -195,25 +197,137 @@ async def set_source_mode(kind: str, request: Request):
     return {"ok": True, "kind": kind, "mode": mode, "updated": updated}
 
 
-# --- Settings ---
+# --- Settings: Policies ---
+
+
+def _is_safe_policy_name(name: str) -> bool:
+    if "/" in name or "\\" in name or ".." in name:
+        return False
+    return name.endswith(".yaml") or name.endswith(".yml")
 
 
 @app.get("/api/settings/policies")
 async def get_policies():
+    """List all policies — both user-editable and bundled (read-only)."""
     ctx = _ctx()
-    policy_dir = ctx.config.paths.policies_dir
-    if not policy_dir.exists():
-        return []
-    return [{"name": p.name, "path": str(p)} for p in sorted(policy_dir.glob("*.yaml"))]
+    user_dir = ctx.config.paths.policies_dir
+    bundled_dir = ctx.policy_engine.bundled_dir
+    result: list[dict[str, Any]] = []
+    if user_dir.exists():
+        for p in sorted(user_dir.glob("*.yaml")):
+            result.append({"name": p.name, "source": "user", "content": p.read_text()})
+    if bundled_dir and bundled_dir.exists():
+        for p in sorted(bundled_dir.glob("*.yaml")):
+            result.append({"name": p.name, "source": "bundled", "content": p.read_text()})
+    return result
+
+
+@app.get("/api/settings/policies/schema")
+async def get_policy_schema():
+    """Return field metadata for the form-mode editor."""
+    from pathlib import Path
+
+    import loom
+
+    ctx = _ctx()
+    user_prompts_dir = ctx.config.paths.prompts_dir
+    bundled_prompts_dir = Path(loom.__file__).parent / "prompts"
+
+    prompts: list[str] = []
+    seen: set[str] = set()
+    for d in (user_prompts_dir, bundled_prompts_dir):
+        if d.exists():
+            for p in sorted(d.glob("*.md")):
+                if p.stem not in seen:
+                    seen.add(p.stem)
+                    prompts.append(p.stem)
+
+    return {
+        "sources": ["github", "gmail", "rss", "arxiv"],
+        "models": ["sonnet", "opus", "haiku", ""],
+        "tools": ["Read", "Grep", "Glob", "Bash", "WebFetch", "WebSearch", "Edit", "Write"],
+        "prompts": prompts,
+        "groups": list(ctx.config.groups.keys()),
+        "match_fields": ["source", "group", "labels", "source_id_pattern", "title_pattern"],
+        "action_fields": [
+            "priority",
+            "agent",
+            "prompt",
+            "auto_approve",
+            "batch",
+            "batch_window",
+            "tools",
+            "max_turns",
+            "system_prompt",
+            "model",
+            "skills",
+            "cwd",
+        ],
+    }
+
+
+@app.get("/api/settings/policies/{name}")
+async def get_policy(name: str):
+    """Return the content of a single policy file (user or bundled)."""
+    if not _is_safe_policy_name(name):
+        return JSONResponse(status_code=400, content={"error": "invalid policy name"})
+    ctx = _ctx()
+    user_path = ctx.config.paths.policies_dir / name
+    if user_path.exists():
+        return {"name": name, "source": "user", "content": user_path.read_text()}
+    bundled_dir = ctx.policy_engine.bundled_dir
+    if bundled_dir:
+        bundled_path = bundled_dir / name
+        if bundled_path.exists():
+            return {"name": name, "source": "bundled", "content": bundled_path.read_text()}
+    return JSONResponse(status_code=404, content={"error": "not found"})
 
 
 @app.put("/api/settings/policies/{name}")
-async def save_policy(name: str, content: str):
+async def save_policy(name: str, request: Request):
+    """Save a user policy and hot-reload the engine."""
+    if not _is_safe_policy_name(name):
+        return JSONResponse(status_code=400, content={"error": "invalid policy name"})
     ctx = _ctx()
+    body = await request.json()
+    content = body.get("content", "")
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        return JSONResponse(status_code=400, content={"error": f"invalid YAML: {exc}"})
+    if data is not None and not isinstance(data, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "policy must be a YAML object with 'rules:' key"},
+        )
+
     path = ctx.config.paths.policies_dir / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
-    return {"saved": name}
+    ctx.policy_engine.reload()
+    return {"saved": name, "rules": len(ctx.policy_engine.list_rules())}
+
+
+@app.delete("/api/settings/policies/{name}")
+async def delete_policy(name: str):
+    """Delete a user policy and hot-reload the engine. Bundled policies cannot be deleted."""
+    if not _is_safe_policy_name(name):
+        return JSONResponse(status_code=400, content={"error": "invalid policy name"})
+    ctx = _ctx()
+    path = ctx.config.paths.policies_dir / name
+    if not path.exists():
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    path.unlink()
+    ctx.policy_engine.reload()
+    return {"deleted": name, "rules": len(ctx.policy_engine.list_rules())}
+
+
+@app.post("/api/settings/policies/reload")
+async def reload_policies():
+    """Manually trigger a reload (useful for debugging)."""
+    ctx = _ctx()
+    ctx.policy_engine.reload()
+    return {"rules": len(ctx.policy_engine.list_rules())}
 
 
 @app.get("/api/settings/prompts")

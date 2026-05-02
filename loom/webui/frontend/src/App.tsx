@@ -8,8 +8,12 @@ import { Sidebar } from "@/components/Sidebar"
 import { KanbanBoard } from "@/components/KanbanBoard"
 import { EnvelopeDrawer } from "@/components/EnvelopeDrawer"
 import { StatusBar } from "@/components/StatusBar"
+import { SettingsPage } from "@/pages/SettingsPage"
+
+type View = "inbox" | "settings"
 
 export default function App() {
+  const [view, setView] = useState<View>("inbox")
   const [sourceFilter, setSourceFilter] = useState<string | null>(() =>
     getDefaultSource()
   )
@@ -20,31 +24,43 @@ export default function App() {
     queryKey: ["envelopes", sourceFilter],
     queryFn: () => listEnvelopes(sourceFilter ?? undefined),
     refetchInterval: 7_000,
+    enabled: view === "inbox",
   })
 
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar
+        view={view}
+        onViewChange={setView}
         sourceFilter={sourceFilter}
-        onSourceFilter={setSourceFilter}
+        onSourceFilter={(src) => {
+          setSourceFilter(src)
+          setView("inbox")
+        }}
         showArchived={showArchived}
         onToggleArchived={() => setShowArchived((v) => !v)}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
         <main className="flex-1 overflow-hidden">
-          <KanbanBoard
-            envelopes={envelopes}
-            showArchived={showArchived}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-          />
+          {view === "inbox" ? (
+            <KanbanBoard
+              envelopes={envelopes}
+              showArchived={showArchived}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          ) : (
+            <SettingsPage />
+          )}
         </main>
         <StatusBar />
       </div>
-      <EnvelopeDrawer
-        envelopeId={selectedId}
-        onClose={() => setSelectedId(null)}
-      />
+      {view === "inbox" && (
+        <EnvelopeDrawer
+          envelopeId={selectedId}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
       <Toaster position="bottom-right" richColors />
     </div>
   )
