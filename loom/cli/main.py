@@ -27,6 +27,22 @@ from loom.core.eventbus import EventBus
 from loom.core.mailbox import Mailbox
 from loom.state.store import Store
 
+
+def _load_dotenv() -> None:
+    """Load .env from CWD and ~/.loom/ into os.environ (no overwrite)."""
+    for p in (Path(".env"), DEFAULT_LOOM_DIR / ".env"):
+        if p.is_file():
+            for line in p.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip()
+                if val.startswith('"') and val.endswith('"'):
+                    val = val[1:-1]
+                os.environ.setdefault(key, val)
+
+
 # ------------------------------------------------------------------
 # Parser
 # ------------------------------------------------------------------
@@ -207,6 +223,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def cli(argv: list[str] | None = None) -> int:
+    _load_dotenv()
     args = _build_parser().parse_args(argv)
     args.func(args)
     return 0

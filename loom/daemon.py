@@ -268,7 +268,23 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
 
 if __name__ == "__main__":
     import asyncio
+    import os
 
-    from loom.config import load_config
+    # Load .env files before anything else
+    from pathlib import Path
+
+    from loom.config import DEFAULT_LOOM_DIR, load_config
+
+    for p in (Path(".env"), DEFAULT_LOOM_DIR / ".env"):
+        if p.is_file():
+            for line in p.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip()
+                if val.startswith('"') and val.endswith('"'):
+                    val = val[1:-1]
+                os.environ.setdefault(key, val)
 
     asyncio.run(run_daemon(load_config()))
