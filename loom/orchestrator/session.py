@@ -7,6 +7,7 @@ and exposes lifecycle helpers (spawn, cancel, send follow-up, collect results).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -78,20 +79,39 @@ class SessionManager:
         self,
         max_concurrent: int = 3,
         prompt_dir: Path | None = None,
+        bundled_prompt_dir: Path | None = None,
         on_complete: Callable[[Session], Awaitable[None]] | None = None,
     ) -> None:
         self._sessions: dict[str, Session] = {}
         self._max_concurrent = max_concurrent
+        self._semaphore = asyncio.Semaphore(max_concurrent)
         self._prompt_dir = prompt_dir or Path.home() / ".loom" / "prompts"
+        self._bundled_prompt_dir = bundled_prompt_dir
         self._on_complete = on_complete
         self._templates: dict[str, str] = {}
         self._load_prompt_templates()
 
     def _load_prompt_templates(self) -> None:
-        """Load prompt templates from ~/.loom/prompts/*.md."""
+        """Load prompt templates: bundled defaults -> user overrides -> per-source."""
+        # Layer 1: Bundled defaults from the package
+        if self._bundled_prompt_dir and self._bundled_prompt_dir.exists():
+            for path in sorted(self._bundled_prompt_dir.glob("*.md")):
+                self._templates[path.stem] = path.read_text()
+
+        # Layer 2: User overrides from ~/.loom/prompts/*.md
         if self._prompt_dir.exists():
             for path in sorted(self._prompt_dir.glob("*.md")):
                 self._templates[path.stem] = path.read_text()
+
+        # Layer 3: Per-source overrides from ~/.loom/prompts/<source>/*.md
+        # Namespaced as "github/acme-app" to avoid collisions
+        if self._prompt_dir.exists():
+            for source_dir in sorted(self._prompt_dir.iterdir()):
+                if source_dir.is_dir():
+                    for path in sorted(source_dir.glob("*.md")):
+                        self._templates[f"{source_dir.name}/{path.stem}"] = path.read_text()
+
+        logger.info("Loaded %d prompt templates", len(self._templates))
 
     def get_prompt_template(self, name: str) -> str:
         """Resolve a prompt template by name (e.g. 'prompt_github_critical_issue')."""
@@ -117,61 +137,58 @@ class SessionManager:
     async def spawn(
         self,
         envelope_id: str,
-        prompt_template: str,
+        task_prompt: str,
         system_prompt: str = "",
         allowed_tools: list[str] | None = None,
         agent_name: str | None = None,
+        model: str | None = None,
+        max_turns: int | None = None,
+        skills: list[str] | None = None,
+        cwd: str | None = None,
     ) -> Session:
         """Spawn a new interactive Claude Code session for the given envelope.
 
-        Uses ``ClaudeSDKClient`` so the session supports:
-        - Multi-turn follow-ups from the user
-        - Interrupts (cancel mid-task)
-        - Permission mode changes
-        - Model switching
+        Respects ``max_concurrent`` via semaphore — waits for a slot if full.
         """
-        if self.active_count >= self._max_concurrent:
-            logger.warning(
-                "Max concurrent sessions (%d) reached — envelope %s queued",
-                self._max_concurrent,
-                envelope_id,
-            )
-
-        resolved_prompt = self.get_prompt_template(prompt_template)
+        effective_system_prompt = system_prompt or (
+            "You are a personal agent that preprocesses incoming messages for the user.\n"
+            "Your job is to summarize, classify urgency, and recommend what the user should do.\n"
+            "Never execute actions directly. Always present your analysis for user approval."
+        )
 
         options = ClaudeAgentOptions(
-            system_prompt=system_prompt or resolved_prompt,
+            system_prompt=effective_system_prompt,
             allowed_tools=allowed_tools or [],
+            model=model,
+            max_turns=max_turns,
+            skills=skills,
+            cwd=cwd,
         )
 
         session = Session(
             envelope_id=envelope_id,
-            prompt_template=prompt_template,
-            system_prompt=system_prompt or resolved_prompt,
+            prompt_template=task_prompt[:200],
+            system_prompt=effective_system_prompt,
             status=SessionStatus.RUNNING,
             started_at=datetime.utcnow(),
         )
         self._sessions[session.id] = session
 
-        client = ClaudeSDKClient(options=options)
-        session._client = client
+        # Acquire semaphore before connecting — blocks if at capacity
+        async def _guarded_run() -> None:
+            async with self._semaphore:
+                client = ClaudeSDKClient(options=options)
+                session._client = client
+                try:
+                    await client.connect()
+                except Exception as exc:
+                    session.status = SessionStatus.FAILED
+                    session.error = str(exc)
+                    logger.error("Failed to connect session %s: %s", session.id, exc)
+                    return
+                await self._run_session(session, task_prompt)
 
-        try:
-            await client.connect()
-        except Exception as exc:
-            session.status = SessionStatus.FAILED
-            session.error = str(exc)
-            logger.error("Failed to connect session %s: %s", session.id, exc)
-            return session
-
-        # Build the task prompt from the envelope context
-        task_prompt = resolved_prompt if not system_prompt else resolved_prompt
-
-        # Fire off the initial query — collect results in background
-        import asyncio
-
-        asyncio.create_task(self._run_session(session, task_prompt))
-
+        asyncio.create_task(_guarded_run())
         return session
 
     async def _run_session(self, session: Session, prompt: str) -> None:
@@ -245,9 +262,6 @@ class SessionManager:
             return False
         try:
             await session._client.query(message)
-            # Re-run the response collector
-            import asyncio
-
             asyncio.create_task(self._run_session(session, ""))
             return True
         except Exception as exc:
@@ -282,6 +296,10 @@ class SessionManager:
         prompt: str,
         system_prompt: str = "",
         allowed_tools: list[str] | None = None,
+        model: str | None = None,
+        max_turns: int | None = None,
+        skills: list[str] | None = None,
+        cwd: str | None = None,
     ) -> str:
         """Run a one-shot ``query()`` and return the assistant text.
 
@@ -293,7 +311,10 @@ class SessionManager:
         options = ClaudeAgentOptions(
             system_prompt=system_prompt,
             allowed_tools=allowed_tools or [],
-            max_turns=3,
+            max_turns=max_turns or 3,
+            model=model,
+            skills=skills,
+            cwd=cwd,
         )
 
         texts: list[str] = []

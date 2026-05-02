@@ -96,6 +96,31 @@ class DaemonContext:
     policy_engine: PolicyEngine
     dispatcher: Dispatcher
     adaptors: list[BaseAdaptor] = field(default_factory=list)
+    _mailbox_enabled: bool = field(default=True, repr=False)
+
+    @property
+    def mailbox_enabled(self) -> bool:
+        return self._mailbox_enabled
+
+    async def set_mailbox_enabled(self, enabled: bool) -> None:
+        """Start or stop all adaptors (mailbox collection)."""
+        if enabled and not self._mailbox_enabled:
+            for ad in self.adaptors:
+                try:
+                    await ad.start()
+                    logger.info("Started %s adaptor", ad.name)
+                except Exception:
+                    logger.exception("Failed to start %s adaptor", ad.name)
+            self._mailbox_enabled = True
+            logger.info("Mailbox enabled — adaptors running")
+        elif not enabled and self._mailbox_enabled:
+            for ad in self.adaptors:
+                try:
+                    await ad.stop()
+                except Exception:
+                    logger.exception("Error stopping %s adaptor", ad.name)
+            self._mailbox_enabled = False
+            logger.info("Mailbox disabled — adaptors stopped")
 
 
 def get_context() -> DaemonContext:
@@ -234,12 +259,19 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     metrics = MetricsCollector()
 
     # --- Orchestrator ---
+    bundled_prompt_dir = Path(__file__).parent / "prompts"
+    bundled_policy_dir = Path(__file__).parent / "policies"
+
     session_mgr = SessionManager(
         max_concurrent=config.agent.max_concurrent,
         prompt_dir=config.paths.prompts_dir,
+        bundled_prompt_dir=bundled_prompt_dir,
     )
-    policy_engine = PolicyEngine(policy_dir=config.paths.policies_dir)
-    dispatcher = Dispatcher(bus, session_mgr, policy_engine, mailbox)
+    policy_engine = PolicyEngine(
+        policy_dir=config.paths.policies_dir,
+        bundled_dir=bundled_policy_dir,
+    )
+    dispatcher = Dispatcher(bus, session_mgr, policy_engine, mailbox, agent_enabled=True)
 
     # Wire session completion callback
     session_mgr._on_complete = dispatcher.handle_session_complete
@@ -269,6 +301,10 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     # --- Start components ---
     await dispatcher.start()
     metrics.set_online(True)
+
+    # Drain pending envelopes from previous runs (respects semaphore)
+    if dispatcher.agent_enabled:
+        dispatcher._start_drain()
 
     started_adaptors: list[BaseAdaptor] = []
     for ad in adaptors:
@@ -355,7 +391,9 @@ if __name__ == "__main__":
                     continue
                 key, _, val = line.partition("=")
                 key, val = key.strip(), val.strip()
-                if val.startswith('"') and val.endswith('"'):
+                if (val.startswith('"') and val.endswith('"')) or (
+                    val.startswith("'") and val.endswith("'")
+                ):
                     val = val[1:-1]
                 os.environ.setdefault(key, val)
 

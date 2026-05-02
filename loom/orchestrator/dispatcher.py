@@ -3,10 +3,16 @@
 Subscribes to the event bus, evaluates incoming envelopes against the
 policy engine, and spawns Claude Code sessions (via claude-agent-sdk)
 to process them.
+
+Supports independent control of the agent processor:
+- ``agent_enabled=True``: dispatch envelopes to agent sessions
+- ``agent_enabled=False``: collect envelopes but skip processing
+- ``drain_pending()``: process backlog of PENDING envelopes
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -21,15 +27,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _SafeDict(dict):
+    """Dict that returns empty string for missing keys — safe for .format_map()."""
+
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
 class Dispatcher:
     """Subscribes to the event bus and dispatches envelopes to agent sessions.
 
-    Flow:
-    1. Listen for ``new_envelope`` events
-    2. Evaluate the envelope against policy rules
-    3. If a rule matches, build ``ClaudeAgentOptions`` from the policy action
-    4. Spawn an interactive or one-shot session via SessionManager
-    5. Update envelope status and collect agent results
+    Two independent toggles:
+    - **Mailbox** (adaptors): collects envelopes from external sources
+    - **Agent** (processor): runs Claude Code sessions on collected envelopes
+
+    Both can be on or off independently. When the agent is off, envelopes
+    accumulate in PENDING status. ``drain_pending()`` processes the backlog.
     """
 
     def __init__(
@@ -38,11 +51,28 @@ class Dispatcher:
         session_mgr: SessionManager,
         policy_engine: PolicyEngine,
         mailbox: Mailbox,
+        agent_enabled: bool = True,
     ) -> None:
         self._bus = bus
         self._sessions = session_mgr
         self._policy = policy_engine
         self._mailbox = mailbox
+        self._agent_enabled = agent_enabled
+        self._drain_task: asyncio.Task | None = None
+
+    @property
+    def agent_enabled(self) -> bool:
+        return self._agent_enabled
+
+    def set_agent_enabled(self, enabled: bool) -> None:
+        """Toggle agent processing on/off. Starts drain when enabled."""
+        changed = self._agent_enabled != enabled
+        self._agent_enabled = enabled
+        if changed:
+            state = "enabled" if enabled else "disabled"
+            logger.info("Agent processing %s", state)
+            if enabled:
+                self._start_drain()
 
     async def start(self) -> None:
         """Subscribe to event bus."""
@@ -50,6 +80,12 @@ class Dispatcher:
 
     async def stop(self) -> None:
         self._bus.unsubscribe("new_envelope", self._on_new_envelope)
+        if self._drain_task:
+            self._drain_task.cancel()
+            try:
+                await self._drain_task
+            except asyncio.CancelledError:
+                pass
 
     # ------------------------------------------------------------------
     # Event handler
@@ -57,13 +93,25 @@ class Dispatcher:
 
     async def _on_new_envelope(self, event: str, data) -> None:
         envelope: Envelope = data
+
+        if not self._agent_enabled:
+            logger.debug("Agent disabled — envelope %s stays PENDING", envelope.id)
+            return
+
+        await self._try_dispatch(envelope)
+
+    # ------------------------------------------------------------------
+    # Dispatch core
+    # ------------------------------------------------------------------
+
+    async def _try_dispatch(self, envelope: Envelope) -> None:
+        """Evaluate envelope against policy and dispatch if matched."""
         action = self._policy.evaluate(envelope)
 
         if action is None:
             logger.info("No matching policy rule for envelope %s — skipping", envelope.id)
             return
 
-        # Update priority if policy overrides it
         if action.priority != envelope.priority:
             envelope.priority = action.priority
 
@@ -77,11 +125,46 @@ class Dispatcher:
             action.auto_approve,
         )
 
-        # Decide: interactive (multi-turn) or one-shot
         if action.auto_approve:
             await self._dispatch_oneshot(envelope, action)
         else:
             await self._dispatch_interactive(envelope, action)
+
+    # ------------------------------------------------------------------
+    # Pending drain
+    # ------------------------------------------------------------------
+
+    def _start_drain(self) -> None:
+        """Start background task to process PENDING envelopes."""
+        if self._drain_task and not self._drain_task.done():
+            return
+        self._drain_task = asyncio.create_task(self._drain_pending())
+
+    async def drain_pending(self) -> int:
+        """Process all PENDING envelopes. Returns count dispatched."""
+        pending = await self._mailbox._store.query_envelopes(
+            status=EnvelopeStatus.PENDING, limit=10_000
+        )
+        if not pending:
+            return 0
+
+        logger.info("Draining %d pending envelopes", len(pending))
+        count = 0
+        for env in pending:
+            if not self._agent_enabled:
+                break
+            await self._try_dispatch(env)
+            count += 1
+        return count
+
+    async def _drain_pending(self) -> None:
+        """Background task that drains pending envelopes."""
+        try:
+            await self.drain_pending()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Error draining pending envelopes")
 
     # ------------------------------------------------------------------
     # Interactive dispatch (user review required)
@@ -90,13 +173,18 @@ class Dispatcher:
     async def _dispatch_interactive(self, envelope: Envelope, action: PolicyAction) -> None:
         """Spawn an interactive session whose results will be presented to the user."""
         system_prompt = action.system_prompt or self._build_system_prompt(envelope, action)
+        task_prompt = self._build_task_prompt(envelope, action)
 
         session = await self._sessions.spawn(
             envelope_id=envelope.id,
-            prompt_template=action.prompt,
+            task_prompt=task_prompt,
             system_prompt=system_prompt,
             allowed_tools=action.tools or None,
             agent_name=action.agent or None,
+            model=action.model or None,
+            max_turns=action.max_turns,
+            skills=action.skills or None,
+            cwd=action.cwd or None,
         )
         logger.info("Interactive session %s spawned for envelope %s", session.id, envelope.id)
 
@@ -113,6 +201,10 @@ class Dispatcher:
             system_prompt=action.system_prompt
             or "You are a helpful assistant that processes messages.",
             allowed_tools=action.tools or None,
+            model=action.model or None,
+            max_turns=action.max_turns,
+            skills=action.skills or None,
+            cwd=action.cwd or None,
         )
 
         logger.info("One-shot result for envelope %s: %s", envelope.id, result[:200])
@@ -127,13 +219,17 @@ class Dispatcher:
     # ------------------------------------------------------------------
 
     def _build_system_prompt(self, envelope: Envelope, action: PolicyAction) -> str:
-        """Build a system prompt that gives the agent context about the envelope."""
+        """Build a system prompt that gives the agent context about its role."""
         return (
-            "You are a personal agent that processes incoming messages on behalf of the user.\n"
-            "Analyze the message, decide if action is needed, and propose a response.\n"
-            f"Source: {envelope.source}\n"
-            f"Title: {envelope.title}\n"
-            "Do NOT take final action — present your analysis and recommendation for user approval."
+            "You are a personal agent that preprocesses incoming messages for "
+            "the user.\n"
+            "Your job is to help the user READ and UNDERSTAND their messages, "
+            "not to take actions on their behalf.\n"
+            "For each message: summarize, classify urgency, and recommend "
+            "what the user should do.\n"
+            "Never execute actions directly. Always present your analysis "
+            "for the user to approve.\n"
+            f"Current message source: {envelope.source}\n"
         )
 
     def _build_task_prompt(self, envelope: Envelope, action: PolicyAction) -> str:
@@ -150,13 +246,17 @@ class Dispatcher:
             )
 
         # Interpolate envelope fields into the template
-        return prompt_template.format(
-            source=envelope.source,
-            title=envelope.title,
-            body=envelope.body,
-            source_id=envelope.source_id,
-            labels=", ".join(envelope.labels),
+        context = _SafeDict(
+            {
+                "source": envelope.source,
+                "title": envelope.title,
+                "body": envelope.body or "",
+                "source_id": envelope.source_id,
+                "labels": ", ".join(envelope.labels),
+                "metadata": _SafeDict(envelope.metadata),
+            }
         )
+        return prompt_template.format_map(context)
 
     # ------------------------------------------------------------------
     # Session completion callback

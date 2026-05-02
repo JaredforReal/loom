@@ -41,7 +41,9 @@ def _load_dotenv() -> None:
                     continue
                 key, _, val = line.partition("=")
                 key, val = key.strip(), val.strip()
-                if val.startswith('"') and val.endswith('"'):
+                if (val.startswith('"') and val.endswith('"')) or (
+                    val.startswith("'") and val.endswith("'")
+                ):
                     val = val[1:-1]
                 os.environ.setdefault(key, val)
 
@@ -159,6 +161,38 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- down ----
     down = commands.add_parser("down", help="Stop the Loom daemon.")
     down.set_defaults(func=cmd_down)
+
+    # ---- agent ----
+    agent = commands.add_parser("agent", help="Control agent processing.")
+    agent_actions = agent.add_subparsers(
+        dest="agent_command",
+        required=True,
+        metavar="ACTION",
+    )
+    agent_on = agent_actions.add_parser("on", help="Enable agent processing and drain pending.")
+    agent_on.set_defaults(func=cmd_agent_on)
+    agent_off = agent_actions.add_parser(
+        "off", help="Pause agent processing (mailbox keeps collecting)."
+    )
+    agent_off.set_defaults(func=cmd_agent_off)
+    agent_status = agent_actions.add_parser("status", help="Show agent processing status.")
+    agent_status.set_defaults(func=cmd_agent_status)
+
+    # ---- mailbox ----
+    mailbox = commands.add_parser("mailbox", help="Control mailbox collection (adaptors).")
+    mailbox_actions = mailbox.add_subparsers(
+        dest="mailbox_command",
+        required=True,
+        metavar="ACTION",
+    )
+    mailbox_on = mailbox_actions.add_parser("on", help="Start collecting from sources.")
+    mailbox_on.set_defaults(func=cmd_mailbox_on)
+    mailbox_off = mailbox_actions.add_parser(
+        "off", help="Stop collecting (agent keeps processing)."
+    )
+    mailbox_off.set_defaults(func=cmd_mailbox_off)
+    mailbox_status = mailbox_actions.add_parser("status", help="Show mailbox status.")
+    mailbox_status.set_defaults(func=cmd_mailbox_status)
 
     # ---- status ----
     status = commands.add_parser("status", help="Show queue backlog and envelope status counts.")
@@ -364,8 +398,89 @@ def cmd_down(args: argparse.Namespace) -> None:
     print(f"Warning: Daemon (PID {pid}) did not exit within 5s", file=sys.stderr)
 
 
+# ------------------------------------------------------------------
+# Agent control
+# ------------------------------------------------------------------
+
+
+def _require_daemon_context():
+    """Get DaemonContext or exit if daemon is not running."""
+    config = load_config()
+    pid_path = config.paths.data_dir / "loom.pid"
+    pid = check_pid_file(pid_path)
+    if pid is None:
+        print("Error: Daemon is not running.", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        from loom.daemon import get_context
+
+        return get_context()
+    except RuntimeError:
+        print("Error: Daemon context not available.", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def cmd_agent_on(args: argparse.Namespace) -> None:
+    """Enable agent processing and drain pending envelopes."""
+    ctx = _require_daemon_context()
+    ctx.dispatcher.set_agent_enabled(True)
+    active = ctx.session_mgr.active_count
+    print(
+        f"Agent processing enabled "
+        f"(concurrency: {ctx.session_mgr._max_concurrent}, active: {active})"
+    )
+
+
+def cmd_agent_off(args: argparse.Namespace) -> None:
+    """Pause agent processing. Mailbox keeps collecting."""
+    ctx = _require_daemon_context()
+    ctx.dispatcher.set_agent_enabled(False)
+    print("Agent processing paused. Mailbox is still collecting envelopes.")
+
+
+def cmd_agent_status(args: argparse.Namespace) -> None:
+    """Show agent processing status."""
+    ctx = _require_daemon_context()
+    enabled = ctx.dispatcher.agent_enabled
+    active = ctx.session_mgr.active_count
+    max_c = ctx.session_mgr._max_concurrent
+    state = "enabled" if enabled else "paused"
+    print(f"Agent: {state}  ·  concurrency: {max_c}  ·  active sessions: {active}")
+
+
+# ------------------------------------------------------------------
+# Mailbox control
+# ------------------------------------------------------------------
+
+
+def cmd_mailbox_on(args: argparse.Namespace) -> None:
+    """Start collecting from sources."""
+    ctx = _require_daemon_context()
+    asyncio.run(ctx.set_mailbox_enabled(True))
+    names = [ad.name for ad in ctx.adaptors if ad.is_running]
+    print(f"Mailbox enabled — adaptors running: {', '.join(names) or 'none'}")
+
+
+def cmd_mailbox_off(args: argparse.Namespace) -> None:
+    """Stop collecting. Agent keeps processing pending envelopes."""
+    ctx = _require_daemon_context()
+    asyncio.run(ctx.set_mailbox_enabled(False))
+    print("Mailbox paused — adaptors stopped. Agent continues processing.")
+
+
+def cmd_mailbox_status(args: argparse.Namespace) -> None:
+    """Show mailbox status."""
+    ctx = _require_daemon_context()
+    running = [ad.name for ad in ctx.adaptors if ad.is_running]
+    total = len(ctx.adaptors)
+    state = "enabled" if ctx.mailbox_enabled else "paused"
+    print(f"Mailbox: {state}  ·  adaptors: {len(running)}/{total} running")
+    if running:
+        print(f"  Active: {', '.join(running)}")
+
+
 def cmd_status(args: argparse.Namespace) -> None:
-    """Show queue backlog and envelope status counts."""
+    """Show queue backlog, daemon status, and agent/mailbox state."""
     config = load_config()
     pid_path = config.paths.data_dir / "loom.pid"
     daemon_info = {"online": False, "active_sessions": 0, "queue_backlog": 0}
@@ -387,6 +502,28 @@ def cmd_status(args: argparse.Namespace) -> None:
         console.print(f"  {status:<20} {n}", style="loom.muted")
     if online:
         console.print(f"  daemon pid={pid}", style="loom.muted")
+        # Show agent + mailbox status from live daemon
+        try:
+            from loom.daemon import get_context
+
+            ctx = get_context()
+            agent_state = "on" if ctx.dispatcher.agent_enabled else "off"
+            active = ctx.session_mgr.active_count
+            max_c = ctx.session_mgr._max_concurrent
+            mailbox_state = "on" if ctx.mailbox_enabled else "off"
+            adaptors_running = sum(1 for ad in ctx.adaptors if ad.is_running)
+            adaptors_total = len(ctx.adaptors)
+            console.print(
+                f"  agent: {agent_state}  ·  concurrency: {max_c}  ·  active: {active}",
+                style="loom.muted",
+            )
+            console.print(
+                f"  mailbox: {mailbox_state}  ·  "
+                f"adaptors: {adaptors_running}/{adaptors_total} running",
+                style="loom.muted",
+            )
+        except RuntimeError:
+            pass
     else:
         console.print("  daemon: not running", style="loom.muted")
 

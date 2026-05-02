@@ -30,10 +30,13 @@ Example policy file::
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,6 +53,8 @@ class PolicyAction:
     max_turns: int | None = None  # limit agent turns
     system_prompt: str = ""  # Override system prompt
     model: str = ""  # e.g. "sonnet", "opus"
+    skills: list[str] = field(default_factory=list)  # SDK skill names to inject
+    cwd: str = ""  # Working directory for the agent session
 
 
 @dataclass
@@ -64,18 +69,37 @@ class PolicyRule:
 class PolicyEngine:
     """Loads YAML policy files and evaluates envelopes against rules."""
 
-    def __init__(self, policy_dir: Path | None = None) -> None:
+    def __init__(self, policy_dir: Path | None = None, bundled_dir: Path | None = None) -> None:
         self._rules: list[PolicyRule] = []
         if policy_dir:
-            self.load_policies(policy_dir)
+            self.load_policies(policy_dir, bundled_dir)
 
-    def load_policies(self, policy_dir: Path) -> None:
-        """Load all *.yaml files from the given directory."""
+    def load_policies(self, policy_dir: Path, bundled_dir: Path | None = None) -> None:
+        """Load policies: bundled defaults first, then user overrides.
+
+        User rules are prepended so they match before bundled defaults.
+        """
         self._rules.clear()
-        for path in sorted(policy_dir.glob("*.yaml")):
-            self._load_file(path)
 
-    def _load_file(self, path: Path) -> None:
+        bundled_rules: list[PolicyRule] = []
+        if bundled_dir and bundled_dir.exists():
+            for path in sorted(bundled_dir.glob("*.yaml")):
+                self._load_file_into(path, bundled_rules)
+
+        user_rules: list[PolicyRule] = []
+        for path in sorted(policy_dir.glob("*.yaml")):
+            self._load_file_into(path, user_rules)
+
+        # User rules match first
+        self._rules = user_rules + bundled_rules
+        logger.info(
+            "Loaded %d policy rules (%d user, %d bundled)",
+            len(self._rules),
+            len(user_rules),
+            len(bundled_rules),
+        )
+
+    def _load_file_into(self, path: Path, target: list[PolicyRule]) -> None:
         with open(path) as f:
             data = yaml.safe_load(f)
         for rule_data in data.get("rules", []):
@@ -91,8 +115,10 @@ class PolicyEngine:
                 max_turns=action_data.get("max_turns"),
                 system_prompt=action_data.get("system_prompt", ""),
                 model=action_data.get("model", ""),
+                skills=action_data.get("skills", []),
+                cwd=action_data.get("cwd", ""),
             )
-            self._rules.append(
+            target.append(
                 PolicyRule(
                     name=rule_data.get("name", ""),
                     match=rule_data.get("match", {}),
