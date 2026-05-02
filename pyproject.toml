@@ -75,3 +75,10 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+exclude = ["loom/webui/src/", "loom/webui/dist/"]
+
+[tool.hatch.build]
+exclude = [
+    "loom/webui/src/**",
+    "loom/webui/dist/**",
+]
