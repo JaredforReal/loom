@@ -251,47 +251,6 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
           </div>
         </Card>
 
-        <Card
-          title="Sources"
-          action={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                const next = [...config.sources, { kind: "github" }]
-                update({ ...config, sources: next })
-              }}
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              Add
-            </Button>
-          }
-        >
-          {config.sources.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No sources configured.</p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {config.sources.map((s, i) => (
-                <SourceCard
-                  key={i}
-                  source={s}
-                  groupNames={groupNames}
-                  onChange={(next) => {
-                    const sources = [...config.sources]
-                    sources[i] = next
-                    update({ ...config, sources })
-                  }}
-                  onRemove={() => {
-                    const sources = config.sources.filter((_, j) => j !== i)
-                    update({ ...config, sources })
-                  }}
-                  defaultExpanded={i === config.sources.length - 1 && s.kind === "github" && Object.keys(s).length === 1}
-                />
-              ))}
-            </div>
-          )}
-        </Card>
-
         <Card title="Groups">
           <div className="flex flex-col gap-3">
             {groupNames.length === 0 && (
@@ -343,6 +302,51 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
             </div>
           </div>
         </Card>
+
+        <Card
+          title="Sources"
+          action={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const next = [...config.sources, { kind: "github" }]
+                update({ ...config, sources: next })
+              }}
+            >
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Add
+            </Button>
+          }
+        >
+          {config.sources.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No sources configured.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {config.sources.map((s, i) => (
+                <SourceCard
+                  key={i}
+                  source={s}
+                  groupNames={groupNames}
+                  onChange={(next) => {
+                    const sources = [...config.sources]
+                    sources[i] = next
+                    update({ ...config, sources })
+                  }}
+                  onRemove={() => {
+                    const sources = config.sources.filter((_, j) => j !== i)
+                    update({ ...config, sources })
+                  }}
+                  defaultExpanded={
+                    i === config.sources.length - 1 &&
+                    s.kind === "github" &&
+                    Object.keys(s).length === 1
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   )
@@ -363,7 +367,6 @@ function SourceCard({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const extraEntries = Object.entries(source).filter(([k]) => !SOURCE_COMMON_FIELDS.has(k))
-  const datalistId = `group-list-${Math.random().toString(36).slice(2)}`
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -416,21 +419,20 @@ function SourceCard({
               </select>
             </Field>
             <Field label="Group">
-              <input
-                type="text"
+              <select
                 value={(source.group as string | undefined) ?? ""}
-                list={datalistId}
                 onChange={(e) =>
                   onChange({ ...source, group: e.target.value || undefined })
                 }
-                placeholder="(none)"
                 className={inputCls}
-              />
-              <datalist id={datalistId}>
+              >
+                <option value="">(none)</option>
                 {groupNames.map((g) => (
-                  <option key={g} value={g} />
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </Field>
             <Field label="Mode">
               <select
