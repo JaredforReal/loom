@@ -2,12 +2,11 @@
 
 These tests stub out ``googleapiclient`` and OAuth entirely — no network. They
 cover the helpers (`_extract_header`, `_walk_parts`, `_decode_body`),
-`normalize`, the seen-set persistence, `_poll_once`, and `execute_action`.
+`normalize`, the seen-set export/restore API, `_poll_once`, and `execute_action`.
 """
 
 from __future__ import annotations
 
-import asyncio
 import base64
 from pathlib import Path
 from typing import Any
@@ -23,9 +22,6 @@ from loom.adaptor.gmail import (
     _walk_parts,
 )
 from loom.core.envelope import Envelope
-from loom.core.eventbus import EventBus
-from loom.core.mailbox import Mailbox
-from loom.state.store import Store
 
 # -- fixtures ------------------------------------------------------------------
 
@@ -78,23 +74,25 @@ def _make_message(
 
 
 def _build_adaptor(tmp_path: Path) -> GmailAdaptor:
-    bus = EventBus()
-    store = Store(db_path=tmp_path / "test.db")
-    mailbox = Mailbox(store, bus)
     return GmailAdaptor(
-        mailbox=mailbox,
         client_secrets_path=tmp_path / "client-secrets.json",
         token_path=tmp_path / "token.json",
-        state_path=tmp_path / "state.json",
         poll_seconds=1,
     )
 
 
-async def _build_adaptor_with_store(tmp_path: Path) -> GmailAdaptor:
-    """Like _build_adaptor but initializes the SQLite store."""
+def _build_adaptor_with_recorder(
+    tmp_path: Path,
+) -> tuple[GmailAdaptor, list[Envelope]]:
+    """Build an adaptor with a callback that records emitted envelopes."""
     ad = _build_adaptor(tmp_path)
-    await ad._mailbox._store.init()
-    return ad
+    received: list[Envelope] = []
+
+    async def recorder(env: Envelope) -> None:
+        received.append(env)
+
+    ad.set_callback(recorder)
+    return ad, received
 
 
 # -- helpers -------------------------------------------------------------------
@@ -231,26 +229,25 @@ def test_record_seen_evicts_oldest_at_max(tmp_path: Path) -> None:
 
 def test_load_seen_when_no_state_file(tmp_path: Path) -> None:
     ad = _build_adaptor(tmp_path)
-    ad._load_seen()  # must not raise
+    ad.restore_seen([])
     assert ad._seen_index == set()
 
 
-def test_load_seen_when_corrupt_json(tmp_path: Path) -> None:
+def test_restore_seen_ignores_non_strings(tmp_path: Path) -> None:
     ad = _build_adaptor(tmp_path)
-    ad._state_path.parent.mkdir(parents=True, exist_ok=True)
-    ad._state_path.write_text("not valid json {")
-    ad._load_seen()
-    assert ad._seen_index == set()
+    ad.restore_seen(["a", 123, None, "b"])  # type: ignore[list-item]
+    assert ad._seen_index == {"a", "b"}
 
 
-def test_save_then_load_roundtrip(tmp_path: Path) -> None:
+def test_export_restore_roundtrip(tmp_path: Path) -> None:
     ad = _build_adaptor(tmp_path)
     ad._record_seen("x")
     ad._record_seen("y")
-    ad._save_seen()
+    snapshot = ad.export_seen()
+    assert snapshot == ["x", "y"]
 
     fresh = _build_adaptor(tmp_path)
-    fresh._load_seen()
+    fresh.restore_seen(snapshot)
     assert fresh._seen_index == {"x", "y"}
 
 
@@ -373,14 +370,7 @@ async def test_execute_action_trash(tmp_path: Path) -> None:
 
 
 async def test_poll_ingests_new_messages_and_records_seen(tmp_path: Path) -> None:
-    ad = await _build_adaptor_with_store(tmp_path)
-    received: list[Envelope] = []
-
-    async def capture(_event: str, env: object) -> None:
-        if isinstance(env, Envelope):
-            received.append(env)
-
-    ad._mailbox._bus.subscribe("new_envelope", capture)
+    ad, received = _build_adaptor_with_recorder(tmp_path)
 
     service = MagicMock()
     service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
@@ -398,25 +388,14 @@ async def test_poll_ingests_new_messages_and_records_seen(tmp_path: Path) -> Non
     ad._service = service
 
     await ad._poll_once()
-    # Let bus.publish's create_task callbacks run.
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
 
     assert {e.source_id for e in received} == {"a", "b"}
     assert {"a", "b"} <= ad._seen_index
 
 
 async def test_poll_skips_already_seen(tmp_path: Path) -> None:
-    ad = await _build_adaptor_with_store(tmp_path)
+    ad, received = _build_adaptor_with_recorder(tmp_path)
     ad._record_seen("a")
-
-    received: list[Envelope] = []
-
-    async def capture(_event: str, env: object) -> None:
-        if isinstance(env, Envelope):
-            received.append(env)
-
-    ad._mailbox._bus.subscribe("new_envelope", capture)
 
     service = MagicMock()
     service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
@@ -425,7 +404,6 @@ async def test_poll_skips_already_seen(tmp_path: Path) -> None:
     ad._service = service
 
     await ad._poll_once()
-    await asyncio.sleep(0)
 
     assert received == []
     assert not service.users.return_value.messages.return_value.get.called
@@ -446,14 +424,7 @@ async def test_poll_swallows_http_error_on_list(tmp_path: Path) -> None:
 
 
 async def test_poll_continues_when_one_message_fails(tmp_path: Path) -> None:
-    ad = await _build_adaptor_with_store(tmp_path)
-    received: list[Envelope] = []
-
-    async def capture(_event: str, env: object) -> None:
-        if isinstance(env, Envelope):
-            received.append(env)
-
-    ad._mailbox._bus.subscribe("new_envelope", capture)
+    ad, received = _build_adaptor_with_recorder(tmp_path)
 
     service = MagicMock()
     service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
@@ -473,8 +444,6 @@ async def test_poll_continues_when_one_message_fails(tmp_path: Path) -> None:
     ad._service = service
 
     await ad._poll_once()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
 
     assert {e.source_id for e in received} == {"good"}
     assert "good" in ad._seen_index
