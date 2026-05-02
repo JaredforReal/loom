@@ -92,9 +92,8 @@ uv sync --extra gmail
 |---|---|---|
 | `gmail-client-secrets.json` | 你提供（第 4 步下载） | OAuth 客户端身份 |
 | `gmail-token.json` | 首次运行自动生成 | Access + refresh token |
-| `gmail-state.json` | adaptor 自动维护 | 已处理过的 message id（去重，最多 1000 条） |
 
-这三个文件都不在仓库里，**不要 commit**。
+这两个文件都不在仓库里，**不要 commit**。
 
 ## 常见问题
 
@@ -118,5 +117,4 @@ rm ~/.loom/credentials/gmail-token.json
 ```bash
 rm ~/.loom/credentials/gmail-client-secrets.json
 rm ~/.loom/credentials/gmail-token.json
-rm ~/.loom/credentials/gmail-state.json
 ```

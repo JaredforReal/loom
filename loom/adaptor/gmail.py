@@ -1,14 +1,14 @@
 """Gmail adaptor — Google API REST + OAuth2.
 
 Polls Gmail for new messages matching a query, normalises them into
-``Envelope`` objects, and delivers them to the ``Mailbox``. Approved
-actions supported: ``reply`` / ``archive`` / ``label`` / ``trash``.
+``Envelope`` objects, and delivers them via ``BaseAdaptor._emit`` to
+whatever callback the orchestrator has installed. Approved actions
+supported: ``reply`` / ``archive`` / ``label`` / ``trash``.
 """
 
 from __future__ import annotations
 
 import base64
-import json
 import logging
 from collections import deque
 from collections.abc import Iterable
@@ -29,7 +29,6 @@ from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 
 from loom.adaptor.base import BaseAdaptor
 from loom.core.envelope import Envelope
-from loom.core.mailbox import Mailbox
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,6 @@ SEEN_SET_MAX = 1000
 
 _CREDENTIALS_DIR = Path.home() / ".loom" / "credentials"
 DEFAULT_TOKEN_PATH = _CREDENTIALS_DIR / "gmail-token.json"
-DEFAULT_STATE_PATH = _CREDENTIALS_DIR / "gmail-state.json"
 
 
 # Typed views over the bits of Google's JSON we touch. The Gmail API returns
@@ -68,9 +66,6 @@ class GmailMessage(TypedDict, total=False):
     snippet: str
     internalDate: str
     payload: GmailPayload
-
-
-# --- module-level helpers -----------------------------------------------------
 
 
 def _extract_header(headers: list[GmailHeader], name: str) -> str:
@@ -154,29 +149,22 @@ def _load_credentials(client_secrets: Path, token_path: Path) -> Any:
     return creds
 
 
-# --- adaptor ------------------------------------------------------------------
-
-
 class GmailAdaptor(BaseAdaptor):
-    """Polls Gmail via the Google API and emits Envelopes into a Mailbox."""
+    """Polls Gmail via the Google API and emits Envelopes through ``_emit``."""
 
     name = "gmail"
 
     def __init__(
         self,
-        mailbox: Mailbox,
         client_secrets_path: Path,
         token_path: Path | None = None,
-        state_path: Path | None = None,
         query: str = DEFAULT_QUERY,
         poll_seconds: int = DEFAULT_POLL_SECONDS,
         user_id: str = "me",
         proxy_url: str | None = None,
     ) -> None:
-        self._mailbox = mailbox
         self._client_secrets = client_secrets_path
         self._token_path = token_path or DEFAULT_TOKEN_PATH
-        self._state_path = state_path or DEFAULT_STATE_PATH
         self._query = query
         self._poll_seconds = poll_seconds
         self._user_id = user_id
@@ -188,7 +176,9 @@ class GmailAdaptor(BaseAdaptor):
         self._seen_index: set[str] = set()
         self._running = False
 
-    # ---- lifecycle -------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     async def start(self) -> None:
         """Authenticate, build the Gmail service, and schedule the poll loop."""
@@ -199,7 +189,6 @@ class GmailAdaptor(BaseAdaptor):
         self._service = await anyio.to_thread.run_sync(
             lambda: build("gmail", "v1", credentials=creds, http=http, cache_discovery=False)
         )
-        self._load_seen()
 
         self._scheduler = AsyncIOScheduler()
         self._scheduler.add_job(
@@ -225,7 +214,9 @@ class GmailAdaptor(BaseAdaptor):
     def is_running(self) -> bool:
         return self._running
 
-    # ---- polling ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Polling
+    # ------------------------------------------------------------------
 
     async def _poll_once(self) -> None:
         if self._service is None:
@@ -244,11 +235,10 @@ class GmailAdaptor(BaseAdaptor):
             try:
                 raw = await anyio.to_thread.run_sync(self._fetch_message, mid)
                 envelope = await self.normalize(raw)
-                await self._mailbox.receive(envelope)
+                await self._emit(envelope)
                 self._record_seen(mid)
             except Exception:
                 logger.exception("Failed to ingest gmail message %s", mid)
-        self._save_seen()
 
     def _list_message_ids(self) -> list[str]:
         resp = self._service.users().messages().list(userId=self._user_id, q=self._query).execute()
@@ -268,7 +258,9 @@ class GmailAdaptor(BaseAdaptor):
         )
         return cast(GmailMessage, msg)
 
-    # ---- normalization ---------------------------------------------------
+    # ------------------------------------------------------------------
+    # Normalize
+    # ------------------------------------------------------------------
 
     async def normalize(self, raw_event: Any) -> Envelope:
         """Convert a Gmail message dict into an ``Envelope``."""
@@ -320,7 +312,9 @@ class GmailAdaptor(BaseAdaptor):
             },
         )
 
-    # ---- actions ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Execute actions
+    # ------------------------------------------------------------------
 
     async def execute_action(self, envelope: Envelope, action: dict[str, Any]) -> None:
         """Execute a user-approved action. Raises if the adaptor isn't started."""
@@ -379,7 +373,9 @@ class GmailAdaptor(BaseAdaptor):
             userId=self._user_id, id=envelope.source_id
         ).execute()
 
-    # ---- seen-set persistence -------------------------------------------
+    # ------------------------------------------------------------------
+    # Seen-set (caller owns persistence)
+    # ------------------------------------------------------------------
 
     def _record_seen(self, message_id: str) -> None:
         if message_id in self._seen_index:
@@ -390,25 +386,12 @@ class GmailAdaptor(BaseAdaptor):
         self._seen.append(message_id)
         self._seen_index.add(message_id)
 
-    def _load_seen(self) -> None:
-        if not self._state_path.exists():
-            return
-        try:
-            data = json.loads(self._state_path.read_text())
-        except (OSError, ValueError) as exc:
-            logger.warning("Failed to load gmail seen-set: %s", exc)
-            return
-        seen_raw = data.get("seen", []) if isinstance(data, dict) else []
-        if not isinstance(seen_raw, list):
-            return
-        for mid in seen_raw[-SEEN_SET_MAX:]:
-            if isinstance(mid, str):
-                self._seen.append(mid)
-                self._seen_index.add(mid)
+    def export_seen(self) -> list[str]:
+        """Return the current seen-message-id deque for external persistence."""
+        return list(self._seen)
 
-    def _save_seen(self) -> None:
-        try:
-            self._state_path.parent.mkdir(parents=True, exist_ok=True)
-            self._state_path.write_text(json.dumps({"seen": list(self._seen)}))
-        except OSError as exc:
-            logger.warning("Failed to persist gmail seen-set: %s", exc)
+    def restore_seen(self, entries: list[str]) -> None:
+        """Rehydrate the seen-set from a previous run (caller owns the storage)."""
+        for mid in entries[-SEEN_SET_MAX:]:
+            if isinstance(mid, str):
+                self._record_seen(mid)
