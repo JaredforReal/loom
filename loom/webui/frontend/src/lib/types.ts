@@ -41,3 +41,62 @@ export interface Source {
   unread: number
   [k: string]: unknown
 }
+
+export interface PolicySummary {
+  name: string
+  source: "user" | "bundled"
+  content: string
+}
+
+export interface PolicyAction {
+  priority?: number
+  agent?: string
+  prompt?: string
+  auto_approve?: boolean
+  batch?: boolean
+  batch_window?: string
+  tools?: string[]
+  max_turns?: number | null
+  system_prompt?: string
+  model?: string
+  skills?: string[]
+  cwd?: string
+}
+
+export interface PolicyMatch {
+  source?: string
+  group?: string
+  labels?: string[]
+  source_id_pattern?: string
+  title_pattern?: string
+}
+
+export interface PolicyRule {
+  name: string
+  match: PolicyMatch
+  action: PolicyAction
+}
+
+export interface PolicyFile {
+  rules: PolicyRule[]
+}
+
+export interface PolicySchema {
+  sources: string[]
+  models: string[]
+  tools: string[]
+  prompts: string[]
+  groups: string[]
+  match_fields: string[]
+  action_fields: string[]
+}
+
+export interface PolicySaveResponse {
+  saved: string
+  rules: number
+}
+
+export interface PolicyDeleteResponse {
+  deleted: string
+  rules: number
+}
