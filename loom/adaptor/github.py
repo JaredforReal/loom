@@ -52,7 +52,9 @@ class GitHubAdaptor(BaseAdaptor):
     name = "github"
 
     def __init__(self, token: str | None = None) -> None:
-        self._token = token or os.environ.get("GITHUB_TOKEN", "")
+        if token is None:
+            token = os.environ.get("GITHUB_TOKEN", "")
+        self._token = token
         self._sources: dict[str, GitHubSourceConfig] = {}  # key = "owner/repo"
         self._cursors: dict[str, str] = {}  # key → ISO timestamp
         self._etags: dict[str, str] = {}

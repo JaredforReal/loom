@@ -105,7 +105,6 @@ def _build_adaptors(
             gmail = GmailAdaptor(
                 client_secrets_path=secrets,
                 token_path=Path(src["token_path"]).expanduser() if "token_path" in src else None,
-                state_path=Path(src["state_path"]).expanduser() if "state_path" in src else None,
                 query=src.get("query", "is:unread -in:chats newer_than:1d"),
                 poll_seconds=src.get("poll_seconds", 30),
             )
