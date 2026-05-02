@@ -231,3 +231,9 @@ class ArxivAdaptor(BaseAdaptor):
 
     async def execute_action(self, envelope: Envelope, action: dict) -> None:
         logger.debug("arxiv adaptor received action request (read-only, ignoring): %s", action)
+
+    def export_seen(self) -> list[str]:
+        return list(self._seen_ids)
+
+    def restore_seen(self, entries: list[str]) -> None:
+        self._seen_ids.update(e for e in entries if isinstance(e, str))

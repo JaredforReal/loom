@@ -376,3 +376,9 @@ class GitHubAdaptor(BaseAdaptor):
     def restore_cursors(self, cursors: dict[str, str]) -> None:
         """Restore cursors from previous run."""
         self._cursors.update(cursors)
+
+    def export_seen(self) -> list[str]:
+        return list(self._seen_ids)
+
+    def restore_seen(self, entries: list[str]) -> None:
+        self._seen_ids.update(e for e in entries if isinstance(e, str))

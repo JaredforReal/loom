@@ -16,7 +16,6 @@ import sys
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
 
 import uvicorn
 
@@ -258,21 +257,19 @@ async def _save_github_cursors(adaptor: GitHubAdaptor, store: Store) -> None:
         logger.info("Saved %d GitHub cursors", len(cursors))
 
 
-async def _restore_gmail_seen(adaptor: Any, store: Store) -> None:
-    """Restore Gmail seen-set from database to avoid reprocessing old messages."""
-    raw = await store.get_adaptor_state("gmail", "seen")
+async def _restore_adaptor_seen(ad: BaseAdaptor, store: Store) -> None:
+    raw = await store.get_adaptor_state(ad.name, "seen")
     if raw:
         seen_ids = json.loads(raw)
-        adaptor.restore_seen(seen_ids)
-        logger.info("Restored %d Gmail seen message IDs", len(seen_ids))
+        ad.restore_seen(seen_ids)
+        logger.info("Restored %d seen IDs for %s adaptor", len(seen_ids), ad.name)
 
 
-async def _save_gmail_seen(adaptor: Any, store: Store) -> None:
-    """Persist Gmail seen-set to database."""
-    seen_ids = adaptor.export_seen()
+async def _save_adaptor_seen(ad: BaseAdaptor, store: Store) -> None:
+    seen_ids = ad.export_seen()
     if seen_ids:
-        await store.save_adaptor_state("gmail", "seen", json.dumps(seen_ids))
-        logger.debug("Saved %d Gmail seen message IDs", len(seen_ids))
+        await store.save_adaptor_state(ad.name, "seen", json.dumps(seen_ids))
+        logger.debug("Saved %d seen IDs for %s adaptor", len(seen_ids), ad.name)
 
 
 # ---------------------------------------------------------------------------
@@ -341,12 +338,11 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     # --- Adaptors ---
     adaptors = _build_adaptors(config.sources, mailbox, config)
 
-    # Restore GitHub cursors before starting
+    # Restore persisted state before starting
     for ad in adaptors:
         if isinstance(ad, GitHubAdaptor):
             await _restore_github_cursors(ad, store)
-        elif ad.name == "gmail":
-            await _restore_gmail_seen(ad, store)
+        await _restore_adaptor_seen(ad, store)
 
     # --- Set context (for WebUI access) ---
     ctx = DaemonContext(
@@ -420,8 +416,7 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
                 if shutdown_event.is_set():
                     break
                 for ad in started_adaptors:
-                    if ad.name == "gmail":
-                        await _save_gmail_seen(ad, store)
+                    await _save_adaptor_seen(ad, store)
             except Exception:
                 logger.exception("Error in periodic persistence")
 
@@ -450,8 +445,7 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         try:
             if isinstance(ad, GitHubAdaptor):
                 await _save_github_cursors(ad, store)
-            elif ad.name == "gmail":
-                await _save_gmail_seen(ad, store)
+            await _save_adaptor_seen(ad, store)
         except Exception:
             logger.exception("Error saving %s state", ad.name)
 
