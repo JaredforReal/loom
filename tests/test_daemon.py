@@ -40,22 +40,22 @@ def _make_config(tmp_path: Path, sources: list[dict] | None = None) -> LoomConfi
 
 class TestDaemonContext:
     def test_get_context_raises_when_not_set(self) -> None:
-        # Ensure context is cleared
-        import loom.daemon
+        from loom.webui.app import app
 
-        loom.daemon._ctx = None
+        if hasattr(app.state, "ctx"):
+            delattr(app.state, "ctx")
         with pytest.raises(RuntimeError, match="Daemon not running"):
             get_context()
 
     def test_set_and_get_context(self) -> None:
-        import loom.daemon
+        from loom.webui.app import app
 
         ctx = MagicMock(spec=DaemonContext)
         set_context(ctx)
         assert get_context() is ctx
 
         # Cleanup
-        loom.daemon._ctx = None
+        delattr(app.state, "ctx")
 
 
 class TestBuildAdaptors:
@@ -116,7 +116,6 @@ class TestBuildAdaptors:
 class TestDaemonBootstrap:
     async def test_daemon_starts_and_stops_cleanly(self, tmp_loom_dir: Path) -> None:
         """Verify run_daemon bootstraps all components and shuts down gracefully."""
-        import loom.daemon
         from loom.daemon import run_daemon
 
         config = _make_config(tmp_loom_dir)
@@ -135,7 +134,11 @@ class TestDaemonBootstrap:
         await asyncio.wait_for(task, timeout=5.0)
 
         # Verify context is cleaned up
-        assert loom.daemon._ctx is None or get_context().metrics.snapshot().online is False
+        try:
+            ctx = get_context()
+            assert ctx.metrics.snapshot().online is False
+        except RuntimeError:
+            pass  # Context cleaned up on shutdown — OK
 
     async def test_adaptor_failure_doesnt_crash_daemon(self, tmp_loom_dir: Path) -> None:
         """One adaptor failing to start shouldn't prevent the daemon from running."""

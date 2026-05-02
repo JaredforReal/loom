@@ -399,84 +399,79 @@ def cmd_down(args: argparse.Namespace) -> None:
 
 
 # ------------------------------------------------------------------
-# Agent control
+# Agent / Mailbox control (via HTTP API)
 # ------------------------------------------------------------------
 
 
-def _require_daemon_context():
-    """Get DaemonContext or exit if daemon is not running."""
-    config = load_config()
-    pid_path = config.paths.data_dir / "loom.pid"
-    pid = check_pid_file(pid_path)
-    if pid is None:
-        print("Error: Daemon is not running.", file=sys.stderr)
-        raise SystemExit(1)
-    try:
-        from loom.daemon import get_context
+def _api_call(method: str, path: str) -> dict:
+    """Call the daemon's HTTP API. Returns parsed JSON or exits."""
+    import urllib.error
+    import urllib.request
 
-        return get_context()
-    except RuntimeError:
-        print("Error: Daemon context not available.", file=sys.stderr)
+    config = load_config()
+    url = f"http://{config.daemon.host}:{config.daemon.port}{path}"
+    req = urllib.request.Request(url, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            import json
+
+            return json.loads(resp.read())
+    except urllib.error.URLError:
+        print("Error: Daemon is not running.", file=sys.stderr)
         raise SystemExit(1)
 
 
 def cmd_agent_on(args: argparse.Namespace) -> None:
     """Enable agent processing and drain pending envelopes."""
-    ctx = _require_daemon_context()
-    ctx.dispatcher.set_agent_enabled(True)
-    active = ctx.session_mgr.active_count
+    _api_call("POST", "/api/agent/on")
+    data = _api_call("GET", "/api/agent")
     print(
         f"Agent processing enabled "
-        f"(concurrency: {ctx.session_mgr._max_concurrent}, active: {active})"
+        f"(concurrency: {data['max_concurrent']}, "
+        f"active: {data['active_sessions']})"
     )
 
 
 def cmd_agent_off(args: argparse.Namespace) -> None:
     """Pause agent processing. Mailbox keeps collecting."""
-    ctx = _require_daemon_context()
-    ctx.dispatcher.set_agent_enabled(False)
+    _api_call("POST", "/api/agent/off")
     print("Agent processing paused. Mailbox is still collecting envelopes.")
 
 
 def cmd_agent_status(args: argparse.Namespace) -> None:
     """Show agent processing status."""
-    ctx = _require_daemon_context()
-    enabled = ctx.dispatcher.agent_enabled
-    active = ctx.session_mgr.active_count
-    max_c = ctx.session_mgr._max_concurrent
-    state = "enabled" if enabled else "paused"
-    print(f"Agent: {state}  ·  concurrency: {max_c}  ·  active sessions: {active}")
-
-
-# ------------------------------------------------------------------
-# Mailbox control
-# ------------------------------------------------------------------
+    data = _api_call("GET", "/api/agent")
+    state = "on" if data["enabled"] else "off"
+    print(
+        f"Agent: {state}  ·  concurrency: {data['max_concurrent']}  "
+        f"·  active: {data['active_sessions']}"
+    )
 
 
 def cmd_mailbox_on(args: argparse.Namespace) -> None:
     """Start collecting from sources."""
-    ctx = _require_daemon_context()
-    asyncio.run(ctx.set_mailbox_enabled(True))
-    names = [ad.name for ad in ctx.adaptors if ad.is_running]
-    print(f"Mailbox enabled — adaptors running: {', '.join(names) or 'none'}")
+    _api_call("POST", "/api/mailbox/on")
+    data = _api_call("GET", "/api/mailbox")
+    names = ", ".join(data.get("adaptor_names", [])) or "none"
+    print(f"Mailbox enabled — adaptors running: {names}")
 
 
 def cmd_mailbox_off(args: argparse.Namespace) -> None:
     """Stop collecting. Agent keeps processing pending envelopes."""
-    ctx = _require_daemon_context()
-    asyncio.run(ctx.set_mailbox_enabled(False))
+    _api_call("POST", "/api/mailbox/off")
     print("Mailbox paused — adaptors stopped. Agent continues processing.")
 
 
 def cmd_mailbox_status(args: argparse.Namespace) -> None:
     """Show mailbox status."""
-    ctx = _require_daemon_context()
-    running = [ad.name for ad in ctx.adaptors if ad.is_running]
-    total = len(ctx.adaptors)
-    state = "enabled" if ctx.mailbox_enabled else "paused"
-    print(f"Mailbox: {state}  ·  adaptors: {len(running)}/{total} running")
-    if running:
-        print(f"  Active: {', '.join(running)}")
+    data = _api_call("GET", "/api/mailbox")
+    state = "on" if data["enabled"] else "off"
+    running = data["adaptors_running"]
+    total = data["adaptors_total"]
+    names = ", ".join(data.get("adaptor_names", []))
+    print(f"Mailbox: {state}  ·  adaptors: {running}/{total} running")
+    if names:
+        print(f"  Active: {names}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -502,27 +497,24 @@ def cmd_status(args: argparse.Namespace) -> None:
         console.print(f"  {status:<20} {n}", style="loom.muted")
     if online:
         console.print(f"  daemon pid={pid}", style="loom.muted")
-        # Show agent + mailbox status from live daemon
+        # Fetch agent + mailbox status via HTTP API
         try:
-            from loom.daemon import get_context
-
-            ctx = get_context()
-            agent_state = "on" if ctx.dispatcher.agent_enabled else "off"
-            active = ctx.session_mgr.active_count
-            max_c = ctx.session_mgr._max_concurrent
-            mailbox_state = "on" if ctx.mailbox_enabled else "off"
-            adaptors_running = sum(1 for ad in ctx.adaptors if ad.is_running)
-            adaptors_total = len(ctx.adaptors)
+            agent = _api_call("GET", "/api/agent")
+            mailbox = _api_call("GET", "/api/mailbox")
+            a_state = "on" if agent["enabled"] else "off"
             console.print(
-                f"  agent: {agent_state}  ·  concurrency: {max_c}  ·  active: {active}",
+                f"  agent: {a_state}  ·  "
+                f"concurrency: {agent['max_concurrent']}  "
+                f"·  active: {agent['active_sessions']}",
                 style="loom.muted",
             )
+            m_state = "on" if mailbox["enabled"] else "off"
             console.print(
-                f"  mailbox: {mailbox_state}  ·  "
-                f"adaptors: {adaptors_running}/{adaptors_total} running",
+                f"  mailbox: {m_state}  ·  "
+                f"adaptors: {mailbox['adaptors_running']}/{mailbox['adaptors_total']} running",
                 style="loom.muted",
             )
-        except RuntimeError:
+        except SystemExit:
             pass
     else:
         console.print("  daemon: not running", style="loom.muted")
