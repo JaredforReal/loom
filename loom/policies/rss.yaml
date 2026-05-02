@@ -1,0 +1,8 @@
+rules:
+  - name: "RSS feed items"
+    match:
+      source: rss
+    action:
+      priority: 1
+      prompt: "prompt_rss"
+      auto_approve: false

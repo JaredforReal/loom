@@ -21,6 +21,7 @@ import uvicorn
 
 from loom.adaptor.base import BaseAdaptor
 from loom.adaptor.github import GitHubAdaptor, GitHubSourceConfig
+from loom.adaptor.rss import RSSAdaptor, RSSSourceConfig
 from loom.config import LoomConfig, check_pid_file, ensure_loom_dirs, load_config
 from loom.core.eventbus import EventBus
 from loom.core.mailbox import Mailbox
@@ -189,10 +190,26 @@ def _build_adaptors(
             gmail.set_callback(mailbox.receive)
             adaptors.append(gmail)
 
+    # One RSS adaptor handles multiple feeds
+    rss_sources = [s for s in sources if s.get("kind") == "rss"]
+    if rss_sources:
+        proxy = _resolve_proxy(config)
+        rss = RSSAdaptor(proxy=proxy)
+        for src in rss_sources:
+            rss.add_source(
+                RSSSourceConfig(
+                    url=src["url"],
+                    poll_interval=src.get("poll_interval", 300),
+                    title_filter=src.get("title_filter", []),
+                )
+            )
+        rss.set_callback(mailbox.receive)
+        adaptors.append(rss)
+
     # Stub adaptors
     for src in sources:
         kind = src.get("kind", "")
-        if kind not in ("github", "gmail"):
+        if kind not in ("github", "gmail", "rss"):
             logger.warning("Adaptor kind '%s' is not yet implemented, skipping", kind)
 
     return adaptors
