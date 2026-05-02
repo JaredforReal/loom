@@ -103,13 +103,13 @@ def _build_adaptors(
                 src.get("client_secrets", "~/.loom/credentials/gmail-client-secrets.json")
             ).expanduser()
             gmail = GmailAdaptor(
-                mailbox=mailbox,
                 client_secrets_path=secrets,
                 token_path=Path(src["token_path"]).expanduser() if "token_path" in src else None,
                 state_path=Path(src["state_path"]).expanduser() if "state_path" in src else None,
                 query=src.get("query", "is:unread -in:chats newer_than:1d"),
                 poll_seconds=src.get("poll_seconds", 30),
             )
+            gmail.set_callback(mailbox.receive)
             adaptors.append(gmail)
 
     # Stub adaptors
