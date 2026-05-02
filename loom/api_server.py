@@ -6,6 +6,12 @@ and external consumers (CLI commands, web frontend, future integrations).
 
 from __future__ import annotations
 
+import logging
+import os
+import shlex
+import stat
+import subprocess
+import tempfile
 from dataclasses import asdict
 from typing import Any
 
@@ -15,6 +21,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from loom.core.envelope import EnvelopeStatus
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Loom", version="0.1.0")
 
@@ -47,11 +55,11 @@ def _envelope_to_dict(e) -> dict:
 @app.get("/api/status")
 async def get_status():
     ctx = _ctx()
-    s = ctx.metrics.snapshot()
+    pending = await ctx.store.query_envelopes(status=EnvelopeStatus.PENDING, limit=10_000)
     return {
-        "online": s.online,
-        "active_sessions": s.active_sessions,
-        "queue_backlog": s.queue_backlog,
+        "online": True,
+        "active_sessions": ctx.session_mgr.active_count,
+        "queue_backlog": len(pending),
     }
 
 
@@ -90,6 +98,92 @@ async def dismiss_envelope(envelope_id: str):
     if envelope is None:
         return {"error": "not found"}
     return {"status": "dismissed", "id": envelope.id}
+
+
+@app.post("/api/envelopes/{envelope_id}/open-in-terminal")
+async def open_in_terminal(envelope_id: str, request: Request):
+    """Resume an existing Claude Code session or start a new one in Terminal.app.
+
+    If no existing session is found, requires ``{"confirm": true}`` in the
+    request body to actually open the terminal.  Otherwise returns
+    ``{"needs_confirm": true}``.
+    """
+    ctx = _ctx()
+
+    cli_session_id = None
+    session_cwd = None
+    for s in ctx.session_mgr._sessions.values():
+        if s.envelope_id == envelope_id and s.cli_session_id:
+            cli_session_id = s.cli_session_id
+            session_cwd = s.cwd or None
+            break
+
+    if not cli_session_id:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not body.get("confirm"):
+            return {"needs_confirm": True}
+
+    prefix = f"loom_{envelope_id[:8]}"
+    script_path = os.path.join(tempfile.gettempdir(), f"{prefix}_agent.sh")
+
+    with open(script_path, "w") as f:
+        f.write("#!/bin/bash\n")
+        if session_cwd:
+            f.write(f"cd {shlex.quote(session_cwd)}\n")
+        if cli_session_id:
+            f.write(f"claude --resume {shlex.quote(cli_session_id)}\n")
+        else:
+            envelope = await ctx.store.get_envelope(envelope_id)
+            if envelope is None:
+                return {"error": "not found"}
+            prompt_path = os.path.join(tempfile.gettempdir(), f"{prefix}_prompt.md")
+            with open(prompt_path, "w") as pf:
+                pf.write(
+                    f"Follow up on a message from {envelope.source}.\nTitle: {envelope.title}\n"
+                )
+                if envelope.body:
+                    pf.write(f"\nContent:\n{envelope.body}\n")
+                if envelope.agent_summary:
+                    pf.write(f"\nAgent summary:\n{envelope.agent_summary}\n")
+            f.write(f'claude "$(cat {shlex.quote(prompt_path)})"\n')
+            f.write(f"rm -f {shlex.quote(prompt_path)}\n")
+        f.write(f"rm -f {shlex.quote(script_path)}\n")
+    os.chmod(script_path, os.stat(script_path).st_mode | stat.S_IEXEC)
+
+    try:
+        subprocess.Popen(
+            ["open", "-a", "Terminal", script_path],
+            start_new_session=True,
+        )
+        logger.info(
+            "Opened Terminal for envelope %s (resume=%s)", envelope_id, bool(cli_session_id)
+        )
+    except Exception:
+        logger.exception("Failed to open Terminal.app")
+        return {"error": "failed to open terminal"}
+
+    return {"status": "ok", "resumed": bool(cli_session_id)}
+
+
+@app.get("/api/envelopes/{envelope_id}/session")
+async def get_envelope_session(envelope_id: str):
+    """Return the CLI session ID and cwd for the envelope's agent session, if any."""
+    ctx = _ctx()
+    # Check in-memory sessions first (running or recently completed)
+    for s in ctx.session_mgr._sessions.values():
+        if s.envelope_id == envelope_id and s.cli_session_id:
+            return {"cli_session_id": s.cli_session_id, "cwd": s.cwd or None}
+    # Fallback: persisted in envelope metadata (survives daemon restart)
+    envelope = await ctx.store.get_envelope(envelope_id)
+    if envelope is not None:
+        md = envelope.metadata or {}
+        sid = md.get("cli_session_id")
+        if sid:
+            return {"cli_session_id": sid, "cwd": md.get("session_cwd")}
+    return None
 
 
 # --- Sources ---

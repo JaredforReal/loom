@@ -26,4 +26,18 @@ export const dismissEnvelope = (id: string) =>
     method: "POST",
   })
 
+export const openInTerminal = (id: string, confirm?: boolean) => {
+  const init: RequestInit = { method: "POST" }
+  if (confirm) init.body = JSON.stringify({ confirm: true })
+  return jsonFetch<{ status?: string; resumed?: boolean; needs_confirm?: boolean }>(
+    `/api/envelopes/${id}/open-in-terminal`,
+    init,
+  )
+}
+
+export const getEnvelopeSession = (id: string) =>
+  jsonFetch<{ cli_session_id: string; cwd: string | null } | null>(
+    `/api/envelopes/${id}/session`,
+  )
+
 export const listSources = () => jsonFetch<Source[]>("/api/sources")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -60,6 +61,8 @@ class Session:
     error: str = ""
     steps: list[AgentStep] = field(default_factory=list)
     total_cost_usd: float = 0.0
+    cli_session_id: str = ""
+    cwd: str = ""
     _client: ClaudeSDKClient | None = field(default=None, repr=False)
 
 
@@ -193,6 +196,7 @@ class SessionManager:
             system_prompt=effective_system_prompt,
             status=SessionStatus.RUNNING,
             started_at=datetime.utcnow(),
+            cwd=cwd or os.getcwd(),
         )
         self._sessions[session.id] = session
 
@@ -250,6 +254,8 @@ class SessionManager:
                             )
 
                 elif isinstance(message, ResultMessage):
+                    if message.session_id:
+                        session.cli_session_id = message.session_id
                     session.result = "\n".join(
                         s.output for s in session.steps if s.step == "assistant"
                     )
@@ -308,6 +314,8 @@ class SessionManager:
                                 )
                             )
                 elif isinstance(msg, ResultMessage):
+                    if msg.session_id:
+                        session.cli_session_id = msg.session_id
                     session.result = "\n".join(
                         s.output for s in session.steps if s.step == "assistant"
                     )

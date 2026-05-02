@@ -300,6 +300,10 @@ class Dispatcher:
                 {"step": s.step, "input": s.input, "output": s.output, "timestamp": s.timestamp}
                 for s in session.steps
             ]
+            if session.cli_session_id:
+                envelope.metadata["cli_session_id"] = session.cli_session_id
+            if session.cwd:
+                envelope.metadata["session_cwd"] = session.cwd
             await self._mailbox.save_and_transition(envelope, EnvelopeStatus.WAITING_APPROVAL)
             logger.info(
                 "Envelope %s -> WAITING_APPROVAL (session %s completed)", envelope.id, session.id

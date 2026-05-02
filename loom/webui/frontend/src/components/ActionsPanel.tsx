@@ -1,12 +1,11 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { ExternalLink, Eye, Bot, Copy, Check, X } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ExternalLink, Bot, Check, X, Copy } from "lucide-react"
 import { toast } from "sonner"
 
-import { approveEnvelope, dismissEnvelope } from "@/lib/api"
+import { approveEnvelope, dismissEnvelope, getEnvelopeSession, openInTerminal } from "@/lib/api"
 import type { Envelope } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import {
   Tooltip,
   TooltipContent,
@@ -20,16 +19,34 @@ interface ActionsPanelProps {
 
 function extractSourceUrl(envelope: Envelope): string | null {
   const md = (envelope.metadata ?? {}) as Record<string, unknown>
-  const candidates = ["html_url", "permalink", "url", "link"] as const
+  const candidates = [
+    "html_url",
+    "permalink",
+    "link",
+    "entry_id",
+    "pdf_url",
+    "url",
+  ] as const
   for (const key of candidates) {
     const v = md[key]
     if (typeof v === "string" && v.startsWith("http")) return v
+  }
+  // Gmail: construct web URL from thread_id
+  const threadId = md.thread_id
+  if (typeof threadId === "string" && envelope.source === "gmail") {
+    return `https://mail.google.com/mail/u/0/#inbox/${threadId}`
   }
   return null
 }
 
 export function ActionsPanel({ envelope }: ActionsPanelProps) {
   const qc = useQueryClient()
+
+  const { data: sessionInfo } = useQuery({
+    queryKey: ["session", envelope?.id],
+    queryFn: () => getEnvelopeSession(envelope!.id),
+    enabled: !!envelope,
+  })
 
   const approveMut = useMutation({
     mutationFn: (id: string) => approveEnvelope(id),
@@ -62,138 +79,103 @@ export function ActionsPanel({ envelope }: ActionsPanelProps) {
 
   const openInAgent = async () => {
     try {
-      await navigator.clipboard.writeText(envelope.id)
-      toast.success("Envelope id copied", {
-        description: "Paste it into your agent. Jump-out protocol TBD.",
-      })
-    } catch {
-      toast.error("Clipboard blocked")
+      const res = await openInTerminal(envelope.id)
+      if (res.needs_confirm) {
+        if (!window.confirm("No existing session found. Start a new Claude Code session?")) return
+        await openInTerminal(envelope.id, true)
+      }
+      toast.success(res.resumed ? "Resumed session in Terminal" : "Opened in Terminal")
+    } catch (e) {
+      toast.error(String(e))
     }
   }
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex flex-col gap-3 border-t border-border bg-muted/10 px-5 py-4">
-        <div className="flex flex-col gap-2">
-          <PrimaryAction
-            icon={<ExternalLink className="h-4 w-4" />}
+      <div className="flex h-9 shrink-0 items-center justify-between border-t border-border bg-muted/10 px-3">
+        <div className="flex items-center gap-0.5">
+          <IconButton
             label="Open in source"
-            disabledReason={sourceUrl ? null : "No URL in metadata"}
+            disabled={!sourceUrl}
             onClick={() =>
               sourceUrl && window.open(sourceUrl, "_blank", "noopener,noreferrer")
             }
-          />
-          <PrimaryAction
-            icon={<Eye className="h-4 w-4" />}
-            label="Track"
-            disabledReason="Coming in Phase 2"
-            onClick={() => {}}
-          />
-          <PrimaryAction
-            icon={<Bot className="h-4 w-4" />}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </IconButton>
+          <IconButton
             label="Open in Agent"
-            secondaryIcon={<Copy className="h-3 w-3" />}
-            disabledReason={null}
             onClick={openInAgent}
-          />
+          >
+            <Bot className="h-3.5 w-3.5" />
+          </IconButton>
+          {sessionInfo && (
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(`${sessionInfo.cwd ? `cd ${sessionInfo.cwd} && ` : ""}claude -r ${sessionInfo.cli_session_id}`)
+                toast.success("Copied resume command")
+              }}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title={`Session: ${sessionInfo.cli_session_id}${sessionInfo.cwd ? `\ncwd: ${sessionInfo.cwd}` : ""}`}
+            >
+              <Copy className="h-2.5 w-2.5" />
+              {sessionInfo.cli_session_id.slice(0, 8)}
+            </button>
+          )}
         </div>
-
-        <Separator />
-
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-muted-foreground">
-            {canApprove
-              ? "Ready for review"
-              : isTerminal
-                ? `status: ${envelope.status}`
-                : "Awaiting processing"}
-          </div>
-          <div className="flex items-center gap-1">
-            <IconReviewBtn
-              label="Approve"
-              icon={<Check className="h-4 w-4" />}
-              color="text-emerald-600"
-              disabled={!canApprove || approveMut.isPending}
-              onClick={() => approveMut.mutate(envelope.id)}
-            />
-            <IconReviewBtn
-              label="Dismiss"
-              icon={<X className="h-4 w-4" />}
-              color="text-rose-600"
-              disabled={isTerminal || dismissMut.isPending}
-              onClick={() => dismissMut.mutate(envelope.id)}
-            />
-          </div>
+        <div className="flex items-center gap-0.5">
+          <IconButton
+            label="Approve"
+            disabled={!canApprove || approveMut.isPending}
+            onClick={() => approveMut.mutate(envelope.id)}
+            className={cn(!canApprove || "text-emerald-600 hover:text-emerald-700")}
+          >
+            <Check className="h-3.5 w-3.5" />
+          </IconButton>
+          <IconButton
+            label="Dismiss"
+            disabled={isTerminal || dismissMut.isPending}
+            onClick={() => dismissMut.mutate(envelope.id)}
+            className={cn(isTerminal || "text-rose-600 hover:text-rose-700")}
+          >
+            <X className="h-3.5 w-3.5" />
+          </IconButton>
         </div>
       </div>
     </TooltipProvider>
   )
 }
 
-function PrimaryAction({
-  icon,
+function IconButton({
   label,
-  secondaryIcon,
-  disabledReason,
+  disabled,
   onClick,
+  className,
+  children,
 }: {
-  icon: React.ReactNode
   label: string
-  secondaryIcon?: React.ReactNode
-  disabledReason: string | null
+  disabled?: boolean
   onClick: () => void
+  className?: string
+  children: React.ReactNode
 }) {
   const btn = (
     <Button
-      variant="outline"
-      size="sm"
-      disabled={!!disabledReason}
+      variant="ghost"
+      size="icon"
+      disabled={disabled}
       onClick={onClick}
-      className="justify-start gap-2"
+      className={cn("h-7 w-7", className)}
+      aria-label={label}
     >
-      {icon}
-      <span className="flex-1 text-left">{label}</span>
-      {secondaryIcon}
+      {children}
     </Button>
   )
-  if (!disabledReason) return btn
+  if (disabled) return <span className="inline-flex">{btn}</span>
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-block">{btn}</span>
-      </TooltipTrigger>
-      <TooltipContent side="left">{disabledReason}</TooltipContent>
-    </Tooltip>
-  )
-}
-
-function IconReviewBtn({
-  label,
-  icon,
-  color,
-  disabled,
-  onClick,
-}: {
-  label: string
-  icon: React.ReactNode
-  color: string
-  disabled: boolean
-  onClick: () => void
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={disabled}
-          onClick={onClick}
-          className={cn("h-8 w-8", !disabled && color)}
-          aria-label={label}
-        >
-          {icon}
-        </Button>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{btn}</TooltipTrigger>
       <TooltipContent side="top">{label}</TooltipContent>
     </Tooltip>
   )
