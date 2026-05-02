@@ -19,13 +19,11 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 import anyio
-import httplib2  # type: ignore[import-untyped]
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-untyped]
-from googleapiclient.discovery import build  # type: ignore[import-untyped]
-from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 
 from loom.adaptor.base import BaseAdaptor
 from loom.core.envelope import Envelope
@@ -35,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 SCOPES: list[str] = ["https://www.googleapis.com/auth/gmail.modify"]
 DEFAULT_QUERY = "is:unread -in:chats newer_than:1d"
-DEFAULT_POLL_SECONDS = 30
+DEFAULT_POLL_SECONDS = 10
 SEEN_SET_MAX = 1000
 
 _CREDENTIALS_DIR = Path.home() / ".loom" / "credentials"
@@ -105,47 +103,20 @@ def _decode_body(payload: dict[str, Any]) -> str:
     return plain or html
 
 
-def _build_http(proxy_url: str | None) -> Any:
-    if proxy_url is None:
-        return httplib2.Http()
-    # Minimal parsing: scheme://host:port
-    try:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(proxy_url)
-        host = parsed.hostname or "127.0.0.1"
-        port = parsed.port or 8080
-        if parsed.scheme in ("http", "https"):
-            proxy_type = httplib2.socks.PROXY_TYPE_HTTP
-        elif parsed.scheme == "socks5":
-            proxy_type = httplib2.socks.PROXY_TYPE_SOCKS5
-        elif parsed.scheme == "socks4":
-            proxy_type = httplib2.socks.PROXY_TYPE_SOCKS4
-        else:
-            logger.warning("Unsupported proxy scheme %s, using no proxy", parsed.scheme)
-            return httplib2.Http()
-        return httplib2.Http(proxy_info=httplib2.ProxyInfo(proxy_type, host, port))
-    except Exception:
-        logger.warning("Failed to parse proxy_url %s, using no proxy", proxy_url)
-        return httplib2.Http()
-
-
-def _load_credentials(client_secrets: Path, token_path: Path) -> Any:
+def _load_credentials(client_secrets: Path, token_path: Path) -> Credentials:
     """Run InstalledAppFlow on first call, refresh thereafter."""
-    creds: Any = None
+    creds: Credentials | None = None
     if token_path.exists():
-        creds = Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
-            str(token_path), SCOPES
-        )
+        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)  # type: ignore[no-untyped-call]
     if creds is not None and creds.valid:
         return creds
     if creds is not None and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        creds.refresh(Request())  # type: ignore[no-untyped-call]
     else:
         flow = InstalledAppFlow.from_client_secrets_file(str(client_secrets), SCOPES)
         creds = flow.run_local_server(port=0)
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(cast(str, creds.to_json()))
+    token_path.write_text(creds.to_json())
     return creds
 
 
@@ -162,6 +133,7 @@ class GmailAdaptor(BaseAdaptor):
         poll_seconds: int = DEFAULT_POLL_SECONDS,
         user_id: str = "me",
         proxy_url: str | None = None,
+        group: str = "",
     ) -> None:
         self._client_secrets = client_secrets_path
         self._token_path = token_path or DEFAULT_TOKEN_PATH
@@ -169,8 +141,9 @@ class GmailAdaptor(BaseAdaptor):
         self._poll_seconds = poll_seconds
         self._user_id = user_id
         self._proxy_url = proxy_url
+        self._group = group
 
-        self._service: Any = None
+        self._client: httpx.AsyncClient | None = None
         self._scheduler: AsyncIOScheduler | None = None
         self._seen: deque[str] = deque(maxlen=SEEN_SET_MAX)
         self._seen_index: set[str] = set()
@@ -181,13 +154,19 @@ class GmailAdaptor(BaseAdaptor):
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Authenticate, build the Gmail service, and schedule the poll loop."""
+        """Authenticate, build the httpx client, and schedule the poll loop."""
         creds = await anyio.to_thread.run_sync(
             _load_credentials, self._client_secrets, self._token_path
         )
-        http = await anyio.to_thread.run_sync(_build_http, self._proxy_url)
-        self._service = await anyio.to_thread.run_sync(
-            lambda: build("gmail", "v1", credentials=creds, http=http, cache_discovery=False)
+        # Refresh token if expired
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())  # type: ignore[no-untyped-call]
+
+        self._client = httpx.AsyncClient(
+            base_url="https://gmail.googleapis.com",
+            headers={"Authorization": f"Bearer {creds.token}"},
+            timeout=httpx.Timeout(60.0),
+            proxy=self._proxy_url,
         )
 
         self._scheduler = AsyncIOScheduler()
@@ -203,11 +182,13 @@ class GmailAdaptor(BaseAdaptor):
         logger.info("GmailAdaptor started — polling every %ds", self._poll_seconds)
 
     async def stop(self) -> None:
-        """Stop the scheduler and drop the API client."""
+        """Stop the scheduler and close the httpx client."""
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
-        self._service = None
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
         self._running = False
 
     @property
@@ -219,12 +200,15 @@ class GmailAdaptor(BaseAdaptor):
     # ------------------------------------------------------------------
 
     async def _poll_once(self) -> None:
-        if self._service is None:
+        if self._client is None:
             return
         try:
-            listing = await anyio.to_thread.run_sync(self._list_message_ids)
-        except HttpError as exc:
+            listing = await self._list_message_ids()
+        except httpx.HTTPStatusError as exc:
             logger.error("Gmail list failed: %s", exc)
+            return
+        except httpx.RequestError as exc:
+            logger.error("Gmail request failed: %s", exc)
             return
 
         new_ids = [mid for mid in listing if mid not in self._seen_index]
@@ -233,30 +217,34 @@ class GmailAdaptor(BaseAdaptor):
 
         for mid in new_ids:
             try:
-                raw = await anyio.to_thread.run_sync(self._fetch_message, mid)
+                raw = await self._fetch_message(mid)
                 envelope = await self.normalize(raw)
+                envelope.group = self._group
                 await self._emit(envelope)
                 self._record_seen(mid)
             except Exception:
                 logger.exception("Failed to ingest gmail message %s", mid)
 
-    def _list_message_ids(self) -> list[str]:
-        resp = self._service.users().messages().list(userId=self._user_id, q=self._query).execute()
-        out: list[str] = []
-        for entry in resp.get("messages") or []:
-            mid = entry.get("id")
-            if isinstance(mid, str):
-                out.append(mid)
-        return out
-
-    def _fetch_message(self, message_id: str) -> GmailMessage:
-        msg = (
-            self._service.users()
-            .messages()
-            .get(userId=self._user_id, id=message_id, format="full")
-            .execute()
+    async def _list_message_ids(self) -> list[str]:
+        if self._client is None:
+            return []
+        resp = await self._client.get(
+            f"/gmail/v1/users/{self._user_id}/messages",
+            params={"q": self._query},
         )
-        return cast(GmailMessage, msg)
+        resp.raise_for_status()
+        data = resp.json()
+        return [m["id"] for m in data.get("messages", [])]
+
+    async def _fetch_message(self, message_id: str) -> GmailMessage:
+        if self._client is None:
+            raise RuntimeError("GmailAdaptor not started")
+        resp = await self._client.get(
+            f"/gmail/v1/users/{self._user_id}/messages/{message_id}",
+            params={"format": "full"},
+        )
+        resp.raise_for_status()
+        return cast(GmailMessage, resp.json())
 
     # ------------------------------------------------------------------
     # Normalize
@@ -318,22 +306,24 @@ class GmailAdaptor(BaseAdaptor):
 
     async def execute_action(self, envelope: Envelope, action: dict[str, Any]) -> None:
         """Execute a user-approved action. Raises if the adaptor isn't started."""
-        if self._service is None:
+        if self._client is None:
             raise RuntimeError("GmailAdaptor not started")
         action_type = action.get("type", "")
         if action_type == "reply":
-            await anyio.to_thread.run_sync(self._send_reply, envelope, action)
+            await self._send_reply(envelope, action)
         elif action_type == "archive":
-            await anyio.to_thread.run_sync(self._modify_labels, envelope, [], ["INBOX"])
+            await self._modify_labels(envelope, [], ["INBOX"])
         elif action_type == "label":
             add = [str(x) for x in action.get("labels") or []]
-            await anyio.to_thread.run_sync(self._modify_labels, envelope, add, [])
+            await self._modify_labels(envelope, add, [])
         elif action_type == "trash":
-            await anyio.to_thread.run_sync(self._trash, envelope)
+            await self._trash(envelope)
         else:
             raise ValueError(f"Unknown gmail action type: {action_type!r}")
 
-    def _send_reply(self, envelope: Envelope, action: dict[str, Any]) -> None:
+    async def _send_reply(self, envelope: Envelope, action: dict[str, Any]) -> None:
+        if self._client is None:
+            raise RuntimeError("GmailAdaptor not started")
         meta = envelope.metadata
         thread_id = str(meta.get("thread_id", ""))
         msg_id_hdr = str(meta.get("message_id_header", ""))
@@ -359,19 +349,29 @@ class GmailAdaptor(BaseAdaptor):
         body: dict[str, Any] = {"raw": raw}
         if thread_id:
             body["threadId"] = thread_id
-        self._service.users().messages().send(userId=self._user_id, body=body).execute()
 
-    def _modify_labels(self, envelope: Envelope, add: list[str], remove: list[str]) -> None:
-        self._service.users().messages().modify(
-            userId=self._user_id,
-            id=envelope.source_id,
-            body={"addLabelIds": add, "removeLabelIds": remove},
-        ).execute()
+        resp = await self._client.post(
+            f"/gmail/v1/users/{self._user_id}/messages/send",
+            json=body,
+        )
+        resp.raise_for_status()
 
-    def _trash(self, envelope: Envelope) -> None:
-        self._service.users().messages().trash(
-            userId=self._user_id, id=envelope.source_id
-        ).execute()
+    async def _modify_labels(self, envelope: Envelope, add: list[str], remove: list[str]) -> None:
+        if self._client is None:
+            raise RuntimeError("GmailAdaptor not started")
+        resp = await self._client.post(
+            f"/gmail/v1/users/{self._user_id}/messages/{envelope.source_id}/modify",
+            json={"addLabelIds": add, "removeLabelIds": remove},
+        )
+        resp.raise_for_status()
+
+    async def _trash(self, envelope: Envelope) -> None:
+        if self._client is None:
+            raise RuntimeError("GmailAdaptor not started")
+        resp = await self._client.post(
+            f"/gmail/v1/users/{self._user_id}/messages/{envelope.source_id}/trash",
+        )
+        resp.raise_for_status()
 
     # ------------------------------------------------------------------
     # Seen-set (caller owns persistence)

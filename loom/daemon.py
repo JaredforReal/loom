@@ -16,6 +16,7 @@ import sys
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 
@@ -256,6 +257,23 @@ async def _save_github_cursors(adaptor: GitHubAdaptor, store: Store) -> None:
         logger.info("Saved %d GitHub cursors", len(cursors))
 
 
+async def _restore_gmail_seen(adaptor: Any, store: Store) -> None:
+    """Restore Gmail seen-set from database to avoid reprocessing old messages."""
+    raw = await store.get_adaptor_state("gmail", "seen")
+    if raw:
+        seen_ids = json.loads(raw)
+        adaptor.restore_seen(seen_ids)
+        logger.info("Restored %d Gmail seen message IDs", len(seen_ids))
+
+
+async def _save_gmail_seen(adaptor: Any, store: Store) -> None:
+    """Persist Gmail seen-set to database."""
+    seen_ids = adaptor.export_seen()
+    if seen_ids:
+        await store.save_adaptor_state("gmail", "seen", json.dumps(seen_ids))
+        logger.debug("Saved %d Gmail seen message IDs", len(seen_ids))
+
+
 # ---------------------------------------------------------------------------
 # Main daemon entry point
 # ---------------------------------------------------------------------------
@@ -326,6 +344,8 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     for ad in adaptors:
         if isinstance(ad, GitHubAdaptor):
             await _restore_github_cursors(ad, store)
+        elif ad.name == "gmail":
+            await _restore_gmail_seen(ad, store)
 
     # --- Set context (for WebUI access) ---
     ctx = DaemonContext(
@@ -391,7 +411,28 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _request_shutdown)
 
+    # Periodic seen-set persistence (every 60 seconds)
+    async def _periodic_persistence() -> None:
+        while not shutdown_event.is_set():
+            try:
+                await asyncio.sleep(60)
+                if shutdown_event.is_set():
+                    break
+                for ad in started_adaptors:
+                    if ad.name == "gmail":
+                        await _save_gmail_seen(ad, store)
+            except Exception:
+                logger.exception("Error in periodic persistence")
+
+    persistence_task = asyncio.create_task(_periodic_persistence())
+
     await shutdown_event.wait()
+
+    persistence_task.cancel()
+    try:
+        await persistence_task
+    except asyncio.CancelledError:
+        pass
 
     # --- Graceful teardown ---
     logger.info("Beginning graceful shutdown...")
@@ -403,13 +444,15 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         except Exception:
             logger.exception("Error stopping %s adaptor", ad.name)
 
-    # Save cursors
+    # Save cursors and seen-sets
     for ad in started_adaptors:
-        if isinstance(ad, GitHubAdaptor):
-            try:
+        try:
+            if isinstance(ad, GitHubAdaptor):
                 await _save_github_cursors(ad, store)
-            except Exception:
-                logger.exception("Error saving GitHub cursors")
+            elif ad.name == "gmail":
+                await _save_gmail_seen(ad, store)
+        except Exception:
+            logger.exception("Error saving %s state", ad.name)
 
     await dispatcher.stop()
 
