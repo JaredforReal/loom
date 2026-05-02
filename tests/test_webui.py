@@ -213,11 +213,10 @@ class TestContextUnset:
     """If daemon isn't running, WebUI endpoints should bubble a clean error."""
 
     def test_endpoint_without_context_raises(self) -> None:
-        import loom.daemon
+        from loom.api_server import app as api_app
 
-        loom.daemon._ctx = None
+        api_app.state.ctx = None
         client = TestClient(webui_app.app, raise_server_exceptions=False)
         r = client.get("/api/status")
-        # FastAPI's default 500 surface; body shape not asserted.
         assert r.status_code == 500
         _ = MagicMock  # kept for future expansion

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from loom.core.envelope import EnvelopeStatus
@@ -100,9 +100,44 @@ async def list_sources():
     for src in ctx.config.sources:
         kind = src.get("kind", "unknown")
         entry = dict(src)
+        entry.setdefault("mode", "active")
         entry["unread"] = counts.get(kind, 0)
         result.append(entry)
     return result
+
+
+VALID_MODES = {"active", "fetch-only", "paused"}
+
+
+@app.patch("/api/sources/{kind}/mode")
+async def set_source_mode(kind: str, request: Request):
+    ctx = _ctx()
+    body = await request.json()
+    mode = body.get("mode", "")
+    if mode not in VALID_MODES:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"invalid mode: {mode!r}"},
+        )
+
+    updated = 0
+    for src in ctx.config.sources:
+        if src.get("kind") == kind:
+            src["mode"] = mode
+            updated += 1
+
+    if updated == 0:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=404, content={"error": "source kind not found"})
+
+    from loom.config import save_config
+
+    save_config(ctx.config)
+
+    return {"ok": True, "kind": kind, "mode": mode, "updated": updated}
 
 
 # --- Settings ---
