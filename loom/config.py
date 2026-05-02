@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ DEFAULT_LOOM_DIR = Path.home() / ".loom"
 class DaemonSettings:
     host: str = "127.0.0.1"
     port: int = 8732
+    proxy: str | None = None
 
 
 @dataclass
@@ -70,7 +72,12 @@ def load_config(path: Path | None = None) -> LoomConfig:
     if not raw or not isinstance(raw, dict):
         return LoomConfig()
 
-    daemon = DaemonSettings(**raw.get("daemon", {}))
+    daemon_raw = raw.get("daemon", {})
+    daemon = DaemonSettings(
+        host=daemon_raw.get("host", "127.0.0.1"),
+        port=daemon_raw.get("port", 8732),
+        proxy=daemon_raw.get("proxy"),
+    )
     agent = AgentSettings(**raw.get("agent", {}))
 
     paths_raw = raw.get("paths", {})
@@ -98,11 +105,14 @@ def save_config(config: LoomConfig, path: Path | None = None) -> None:
     config_path = path or DEFAULT_LOOM_DIR / "config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
+    daemon_dict: dict[str, Any] = {
+        "host": config.daemon.host,
+        "port": config.daemon.port,
+    }
+    if config.daemon.proxy:
+        daemon_dict["proxy"] = config.daemon.proxy
     data = {
-        "daemon": {
-            "host": config.daemon.host,
-            "port": config.daemon.port,
-        },
+        "daemon": daemon_dict,
         "agent": {
             "max_concurrent": config.agent.max_concurrent,
             "model": config.agent.model,
@@ -131,3 +141,26 @@ def ensure_loom_dirs(config: LoomConfig) -> None:
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
+
+
+def check_pid_file(pid_path: Path) -> int | None:
+    """Check if a process from a PID file is alive.
+
+    Returns PID if the process is alive, None otherwise.
+    Cleans up stale PID files automatically.
+    """
+    if not pid_path.exists():
+        return None
+    try:
+        pid = int(pid_path.read_text().strip())
+    except (ValueError, OSError):
+        pid_path.unlink(missing_ok=True)
+        return None
+    try:
+        os.kill(pid, 0)
+        return pid
+    except ProcessLookupError:
+        pid_path.unlink(missing_ok=True)
+        return None
+    except PermissionError:
+        return pid

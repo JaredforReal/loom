@@ -51,10 +51,11 @@ class GitHubAdaptor(BaseAdaptor):
 
     name = "github"
 
-    def __init__(self, token: str | None = None) -> None:
+    def __init__(self, token: str | None = None, proxy: str | None = None) -> None:
         if token is None:
             token = os.environ.get("GITHUB_TOKEN", "")
         self._token = token
+        self._proxy = proxy
         self._sources: dict[str, GitHubSourceConfig] = {}  # key = "owner/repo"
         self._cursors: dict[str, str] = {}  # key → ISO timestamp
         self._etags: dict[str, str] = {}
@@ -102,6 +103,7 @@ class GitHubAdaptor(BaseAdaptor):
             base_url=GITHUB_API,
             headers=headers,
             timeout=30.0,
+            proxy=self._proxy,
         )
         self._running = True
 

@@ -9,15 +9,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import signal
+import socket
+import sys
 from dataclasses import dataclass, field
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import uvicorn
 
 from loom.adaptor.base import BaseAdaptor
 from loom.adaptor.github import GitHubAdaptor, GitHubSourceConfig
-from loom.config import LoomConfig, ensure_loom_dirs, load_config
+from loom.config import LoomConfig, check_pid_file, ensure_loom_dirs, load_config
 from loom.core.eventbus import EventBus
 from loom.core.mailbox import Mailbox
 from loom.observability.metrics import MetricsCollector
@@ -27,6 +31,52 @@ from loom.orchestrator.session import SessionManager
 from loom.state.store import Store
 
 logger = logging.getLogger(__name__)
+
+LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+
+
+def setup_logging(log_path: Path, foreground: bool = False) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    loom_logger = logging.getLogger("loom")
+    loom_logger.setLevel(logging.DEBUG)
+
+    # File handler — always active
+    fh = RotatingFileHandler(log_path, maxBytes=10 * 1024 * 1024, backupCount=3)
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(LOG_FORMAT))
+    loom_logger.addHandler(fh)
+
+    # Console handler — only in foreground mode
+    if foreground:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter(LOG_FORMAT))
+        loom_logger.addHandler(ch)
+
+
+def _write_pid(pid_path: Path) -> None:
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(str(os.getpid()))
+
+
+def _remove_pid(pid_path: Path) -> None:
+    try:
+        pid_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _resolve_proxy(config: LoomConfig) -> str | None:
+    if config.daemon.proxy:
+        return config.daemon.proxy
+    return (
+        os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("http_proxy")
+    )
+
 
 # ---------------------------------------------------------------------------
 # DaemonContext — shared runtime state
@@ -75,10 +125,9 @@ def _build_adaptors(
     # Group github sources — one adaptor handles multiple repos
     github_sources = [s for s in sources if s.get("kind") == "github"]
     if github_sources:
-        import os
-
         token = os.environ.get("GITHUB_TOKEN")
-        gh = GitHubAdaptor(token=token)
+        proxy = _resolve_proxy(config)
+        gh = GitHubAdaptor(token=token, proxy=proxy)
         for src in github_sources:
             gh.add_source(
                 GitHubSourceConfig(
@@ -98,6 +147,7 @@ def _build_adaptors(
     if gmail_sources:
         from loom.adaptor.gmail import GmailAdaptor
 
+        proxy = _resolve_proxy(config)
         for src in gmail_sources:
             secrets = Path(
                 src.get("client_secrets", "~/.loom/credentials/gmail-client-secrets.json")
@@ -107,6 +157,7 @@ def _build_adaptors(
                 token_path=Path(src["token_path"]).expanduser() if "token_path" in src else None,
                 query=src.get("query", "is:unread -in:chats newer_than:1d"),
                 poll_seconds=src.get("poll_seconds", 30),
+                proxy_url=proxy,
             )
             gmail.set_callback(mailbox.receive)
             adaptors.append(gmail)
@@ -151,6 +202,29 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         config = load_config()
 
     ensure_loom_dirs(config)
+
+    pid_path = config.paths.data_dir / "loom.pid"
+
+    # --- Pre-flight checks ---
+    existing_pid = check_pid_file(pid_path)
+    if existing_pid is not None:
+        logger.error("Daemon already running (PID %d)", existing_pid)
+        raise SystemExit(1)
+
+    # Check port availability
+    try:
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_sock.settimeout(1)
+        test_sock.bind((config.daemon.host, config.daemon.port))
+        test_sock.close()
+    except OSError as exc:
+        logger.error(
+            "Port %d on %s is already in use: %s",
+            config.daemon.port,
+            config.daemon.host,
+            exc,
+        )
+        raise SystemExit(1)
 
     # --- Core infrastructure ---
     bus = EventBus()
@@ -218,6 +292,7 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     )
     server = uvicorn.Server(uv_config)
     uvicorn_task = asyncio.create_task(server.serve())
+    _write_pid(pid_path)
 
     logger.info("Loom daemon online at http://%s:%d", config.daemon.host, config.daemon.port)
 
@@ -262,14 +337,12 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         logger.warning("Uvicorn did not shut down in time")
 
     await store.close()
+    _remove_pid(pid_path)
     logger.info("Loom daemon shut down")
 
 
 if __name__ == "__main__":
-    import asyncio
     import os
-
-    # Load .env files before anything else
     from pathlib import Path
 
     from loom.config import DEFAULT_LOOM_DIR, load_config
@@ -286,4 +359,18 @@ if __name__ == "__main__":
                     val = val[1:-1]
                 os.environ.setdefault(key, val)
 
-    asyncio.run(run_daemon(load_config()))
+    config = load_config()
+    foreground = "--foreground" in sys.argv
+    setup_logging(config.paths.data_dir / "loom.log", foreground=foreground)
+
+    try:
+        asyncio.run(run_daemon(config))
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            logger.error("Daemon exited with code %s", exc.code)
+        raise
+    except KeyboardInterrupt:
+        logger.info("Interrupted")
+    except Exception:
+        logger.exception("Daemon crashed with unexpected error")
+        raise SystemExit(1)
