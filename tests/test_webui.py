@@ -45,12 +45,14 @@ async def webui_ctx(tmp_loom_dir: Path):
     metrics.update(active_sessions=0, queue_backlog=0)
 
     config = _make_config(tmp_loom_dir)
+    session_mgr = MagicMock(active_count=0)
     ctx = SimpleNamespace(
         config=config,
         store=store,
         bus=bus,
         mailbox=mailbox,
         metrics=metrics,
+        session_mgr=session_mgr,
     )
     daemon_mod.set_context(ctx)  # type: ignore[arg-type]
     try:
