@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ExternalLink, Bot, Check, X } from "lucide-react"
 import { toast } from "sonner"
 
-import { approveEnvelope, dismissEnvelope } from "@/lib/api"
+import { approveEnvelope, dismissEnvelope, openInTerminal } from "@/lib/api"
 import type { Envelope } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -19,10 +19,22 @@ interface ActionsPanelProps {
 
 function extractSourceUrl(envelope: Envelope): string | null {
   const md = (envelope.metadata ?? {}) as Record<string, unknown>
-  const candidates = ["html_url", "permalink", "url", "link"] as const
+  const candidates = [
+    "html_url",
+    "permalink",
+    "link",
+    "entry_id",
+    "pdf_url",
+    "url",
+  ] as const
   for (const key of candidates) {
     const v = md[key]
     if (typeof v === "string" && v.startsWith("http")) return v
+  }
+  // Gmail: construct web URL from thread_id
+  const threadId = md.thread_id
+  if (typeof threadId === "string" && envelope.source === "gmail") {
+    return `https://mail.google.com/mail/u/0/#inbox/${threadId}`
   }
   return null
 }
@@ -61,12 +73,14 @@ export function ActionsPanel({ envelope }: ActionsPanelProps) {
 
   const openInAgent = async () => {
     try {
-      await navigator.clipboard.writeText(envelope.id)
-      toast.success("Envelope id copied", {
-        description: "Paste it into your agent. Jump-out protocol TBD.",
-      })
-    } catch {
-      toast.error("Clipboard blocked")
+      const res = await openInTerminal(envelope.id)
+      if (res.needs_confirm) {
+        if (!window.confirm("No existing session found. Start a new Claude Code session?")) return
+        await openInTerminal(envelope.id, true)
+      }
+      toast.success(res.resumed ? "Resumed session in Terminal" : "Opened in Terminal")
+    } catch (e) {
+      toast.error(String(e))
     }
   }
 

@@ -60,6 +60,7 @@ class Session:
     error: str = ""
     steps: list[AgentStep] = field(default_factory=list)
     total_cost_usd: float = 0.0
+    cli_session_id: str = ""
     _client: ClaudeSDKClient | None = field(default=None, repr=False)
 
 
@@ -250,6 +251,8 @@ class SessionManager:
                             )
 
                 elif isinstance(message, ResultMessage):
+                    if message.session_id:
+                        session.cli_session_id = message.session_id
                     session.result = "\n".join(
                         s.output for s in session.steps if s.step == "assistant"
                     )
@@ -308,6 +311,8 @@ class SessionManager:
                                 )
                             )
                 elif isinstance(msg, ResultMessage):
+                    if msg.session_id:
+                        session.cli_session_id = msg.session_id
                     session.result = "\n".join(
                         s.output for s in session.steps if s.step == "assistant"
                     )
