@@ -166,6 +166,7 @@ def _build_adaptors(
                     state=src.get("state", "all"),
                     events=src.get("events", ["issues", "pull_requests"]),
                     labels_filter=src.get("labels_filter"),
+                    group=src.get("group", ""),
                 )
             )
         gh.set_callback(mailbox.receive)
@@ -202,6 +203,7 @@ def _build_adaptors(
                     url=src["url"],
                     poll_interval=src.get("poll_interval", 300),
                     title_filter=src.get("title_filter", []),
+                    group=src.get("group", ""),
                 )
             )
         rss.set_callback(mailbox.receive)
@@ -219,6 +221,7 @@ def _build_adaptors(
                     keywords=src.get("keywords", []),
                     poll_interval=src.get("poll_interval", 3600),
                     max_results=src.get("max_results", 50),
+                    group=src.get("group", ""),
                 )
             )
         arx.set_callback(mailbox.receive)
@@ -309,7 +312,9 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         policy_dir=config.paths.policies_dir,
         bundled_dir=bundled_policy_dir,
     )
-    dispatcher = Dispatcher(bus, session_mgr, policy_engine, mailbox, agent_enabled=True)
+    dispatcher = Dispatcher(
+        bus, session_mgr, policy_engine, mailbox, agent_enabled=True, config=config
+    )
 
     # Wire session completion callback
     session_mgr._on_complete = dispatcher.handle_session_complete

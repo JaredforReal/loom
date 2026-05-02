@@ -30,6 +30,7 @@ class Envelope:
     status: EnvelopeStatus = EnvelopeStatus.PENDING
     priority: int = 1  # 0=low, 1=normal, 2=high, 3=urgent
     labels: list[str] = field(default_factory=list)
+    group: str = ""
     metadata: dict = field(default_factory=dict)
 
     # Processing results (filled by agent)

@@ -38,6 +38,7 @@ class RSSSourceConfig:
     url: str
     poll_interval: int = DEFAULT_POLL_INTERVAL
     title_filter: list[str] = field(default_factory=list)  # keywords to include
+    group: str = ""
 
 
 class RSSAdaptor(BaseAdaptor):
@@ -170,6 +171,7 @@ class RSSAdaptor(BaseAdaptor):
                     "feed_title": feed_title,
                 }
             )
+            envelope.group = config.group
 
             # Dedup: skip if we've already processed this source_id
             if envelope.source_id in self._seen_ids:

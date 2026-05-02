@@ -7,6 +7,7 @@ and external consumers (CLI commands, web frontend, future integrations).
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,9 +57,9 @@ async def get_status():
 
 
 @app.get("/api/envelopes")
-async def list_envelopes(source: str | None = None, limit: int = 50):
+async def list_envelopes(source: str | None = None, group: str | None = None, limit: int = 50):
     ctx = _ctx()
-    envelopes = await ctx.mailbox.list_envelopes(source=source, limit=limit)
+    envelopes = await ctx.mailbox.list_envelopes(source=source, group=group, limit=limit)
     return [_envelope_to_dict(e) for e in envelopes]
 
 
@@ -104,6 +105,28 @@ async def list_sources():
         entry["unread"] = counts.get(kind, 0)
         result.append(entry)
     return result
+
+
+@app.get("/api/groups")
+async def list_groups():
+    ctx = _ctx()
+    counts = await ctx.mailbox.get_unread_count()
+    groups: dict[str, dict[str, Any]] = {}
+    for src in ctx.config.sources:
+        g = src.get("group")
+        if not g:
+            continue
+        if g not in groups:
+            gcfg = ctx.config.groups.get(g)
+            groups[g] = {
+                "name": g,
+                "sources": [],
+                "unread": 0,
+                **({"prompt": gcfg.prompt, "model": gcfg.model} if gcfg else {}),
+            }
+        groups[g]["sources"].append({k: v for k, v in src.items() if k != "group"})
+        groups[g]["unread"] += counts.get(src.get("kind", ""), 0)
+    return list(groups.values())
 
 
 VALID_MODES = {"active", "fetch-only", "paused"}

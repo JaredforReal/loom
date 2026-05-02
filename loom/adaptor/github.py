@@ -44,6 +44,7 @@ class GitHubSourceConfig:
     state: str = "all"  # "open", "closed", "all"
     labels_filter: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=lambda: ["issues", "pull_requests"])
+    group: str = ""
 
 
 class GitHubAdaptor(BaseAdaptor):
@@ -204,6 +205,7 @@ class GitHubAdaptor(BaseAdaptor):
 
         for item in items:
             envelope = await self.normalize(item)
+            envelope.group = config.group
 
             # Dedup: skip if we've already processed this source_id
             if envelope.source_id in self._seen_ids:

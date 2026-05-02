@@ -135,6 +135,8 @@ class PolicyEngine:
 
     def _matches(self, rule: PolicyRule, envelope) -> bool:
         match = rule.match
+        if "group" in match and envelope.group != match["group"]:
+            return False
         if "source" in match and envelope.source != match["source"]:
             return False
         if "labels" in match:
