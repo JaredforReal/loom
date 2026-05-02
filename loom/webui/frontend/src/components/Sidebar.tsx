@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query"
-import { Archive, Inbox, Settings as SettingsIcon } from "lucide-react"
+import { Archive, FileText, Inbox, Settings as SettingsIcon } from "lucide-react"
 
+import type { View } from "@/App"
 import { listSources } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { SettingsPopover } from "./SettingsPopover"
 
 interface SidebarProps {
-  view: "inbox" | "settings"
-  onViewChange: (view: "inbox" | "settings") => void
+  view: View
+  onViewChange: (view: View) => void
   sourceFilter: string | null
   onSourceFilter: (source: string | null) => void
   showArchived: boolean
@@ -67,8 +68,14 @@ export function Sidebar({
           <SidebarRow
             icon={<SettingsIcon className="h-4 w-4" />}
             label="Policies"
-            active={view === "settings"}
-            onClick={() => onViewChange("settings")}
+            active={view === "policies"}
+            onClick={() => onViewChange("policies")}
+          />
+          <SidebarRow
+            icon={<FileText className="h-4 w-4" />}
+            label="Prompts"
+            active={view === "prompts"}
+            onClick={() => onViewChange("prompts")}
           />
         </Section>
       </nav>
