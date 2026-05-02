@@ -129,6 +129,38 @@ async def list_groups():
     return list(groups.values())
 
 
+@app.get("/api/groups/{name}")
+async def get_group(name: str, limit: int = 50):
+    ctx = _ctx()
+    sources = [
+        {k: v for k, v in src.items() if k != "group"}
+        for src in ctx.config.sources
+        if src.get("group") == name
+    ]
+    if not sources and name not in ctx.config.groups:
+        return {"error": "not found"}
+    gcfg = ctx.config.groups.get(name)
+    envelopes = await ctx.mailbox.list_envelopes(group=name, limit=limit)
+    return {
+        "name": name,
+        "sources": sources,
+        "envelopes": [_envelope_to_dict(e) for e in envelopes],
+        **(
+            {
+                "prompt": gcfg.prompt,
+                "system_prompt": gcfg.system_prompt,
+                "model": gcfg.model,
+                "skills": gcfg.skills,
+                "tools": gcfg.tools,
+                "max_turns": gcfg.max_turns,
+                "auto_approve": gcfg.auto_approve,
+            }
+            if gcfg
+            else {}
+        ),
+    }
+
+
 VALID_MODES = {"active", "fetch-only", "paused"}
 
 
