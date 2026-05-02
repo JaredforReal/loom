@@ -38,6 +38,7 @@ export interface DaemonStatus {
 
 export interface Source {
   kind: string
+  name: string
   unread: number
   group?: string
   [k: string]: unknown
@@ -45,7 +46,7 @@ export interface Source {
 
 export interface GroupSummary {
   name: string
-  sources: Array<Record<string, unknown> & { kind: string }>
+  sources: Array<Record<string, unknown> & { kind: string; name?: string }>
   unread: number
   prompt?: string
   model?: string

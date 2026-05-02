@@ -123,6 +123,15 @@ class Store:
             await conn.execute(
                 text("UPDATE envelopes SET status = 'in_review' WHERE status = 'waiting_approval'")
             )
+            # Migrate: backfill group from source_id for GitHub envelopes
+            await conn.execute(
+                text(
+                    'UPDATE envelopes SET "group" = '
+                    "substr(source_id, 1, instr(source_id, '#') - 1) "
+                    "WHERE source = 'github' AND \"group\" = '' "
+                    "AND source_id LIKE '%#%'"
+                )
+            )
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         logger.info("Store initialized at %s", self._db_path)
 
@@ -192,6 +201,25 @@ class Store:
             )
             if source is not None:
                 stmt = stmt.where(EnvelopeRow.source == source)
+            result = await session.execute(stmt)
+            return {row[0]: row[1] for row in result.all()}
+
+    async def get_unread_counts_by_group(self) -> dict[str, int]:
+        """Return {group: count} for pending/in_review envelopes."""
+        async with self._session() as session:
+            stmt = (
+                select(EnvelopeRow.group, func.count(EnvelopeRow.id))
+                .where(
+                    EnvelopeRow.status.in_(
+                        [
+                            str(EnvelopeStatus.PENDING),
+                            str(EnvelopeStatus.IN_REVIEW),
+                        ]
+                    )
+                )
+                .where(EnvelopeRow.group != "")
+                .group_by(EnvelopeRow.group)
+            )
             result = await session.execute(stmt)
             return {row[0]: row[1] for row in result.all()}
 

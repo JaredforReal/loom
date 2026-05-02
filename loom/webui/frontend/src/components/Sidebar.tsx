@@ -122,10 +122,10 @@ export function Sidebar({
                   <div className="ml-4 flex flex-col">
                     {g.sources.map((s) => (
                       <SidebarRow
-                        key={`${g.name}/${s.kind}`}
-                        label={s.kind}
-                        active={view === "inbox" && sourceFilter === s.kind}
-                        onClick={() => onSourceFilter(s.kind)}
+                        key={`${g.name}/${s.name || s.kind}`}
+                        label={s.name || s.kind}
+                        active={view === "inbox" && groupFilter === g.name}
+                        onClick={() => onGroupFilter(g.name)}
                       />
                     ))}
                   </div>
@@ -135,11 +135,11 @@ export function Sidebar({
           })}
           {ungroupedSources.map((s) => (
             <SidebarRow
-              key={s.kind}
-              label={s.kind}
+              key={s.name || s.kind}
+              label={s.name || s.kind}
               badge={s.unread || undefined}
-              active={view === "inbox" && sourceFilter === s.kind}
-              onClick={() => onSourceFilter(s.kind)}
+              active={view === "inbox" && groupFilter === (s.name || s.kind)}
+              onClick={() => onGroupFilter(s.name || s.kind || null)}
             />
           ))}
         </Section>
