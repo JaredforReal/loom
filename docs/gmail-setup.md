@@ -4,7 +4,7 @@ This guide walks you through connecting Loom's Gmail adaptor to your own Gmail a
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/)
 - A Gmail account
 - macOS or Linux (Windows users: replace `~` with `%USERPROFILE%`)
@@ -54,7 +54,7 @@ mkdir -p ~/.loom/credentials
 mv ~/Downloads/client_secret_*.json ~/.loom/credentials/gmail-client-secrets.json
 ```
 
-The path above is a **recommended** location and name for local development, not a required filename. `GmailAdaptor` accepts the credentials file path explicitly via `client_secrets_path`, so if you store the file elsewhere, make sure your harness or CLI passes that path to the adaptor.
+The path above is the **recommended** location. If you store the file elsewhere, pass the actual path with `--credentials` when running `loom source add gmail`.
 
 ## Step 6 — Install the gmail extra
 
@@ -66,9 +66,25 @@ uv sync --extra gmail
 
 This installs `google-api-python-client`, `google-auth-oauthlib`, and friends.
 
-## Step 7 — First run (OAuth consent in the browser)
+## Step 7 — Register the Gmail source
 
-Start the adaptor (e.g. via your harness or smoke script). On the first run:
+```bash
+loom source add gmail --credentials ~/.loom/credentials/gmail-client-secrets.json
+```
+
+Optionally attach it to a group (create the group first in the Config editor):
+
+```bash
+loom source add gmail --credentials ~/.loom/credentials/gmail-client-secrets.json --group inbox
+```
+
+## Step 8 — First run (OAuth consent in the browser)
+
+```bash
+loom up
+```
+
+On the first run:
 
 1. A browser window opens automatically.
 2. Pick the Google account you added as a test user.
@@ -82,7 +98,7 @@ A new file is now written:
 ~/.loom/credentials/gmail-token.json
 ```
 
-This contains your access + refresh tokens. Loom will refresh them automatically; you do not need to redo Step 7 unless the token is revoked.
+This contains your access + refresh tokens. Loom will refresh them automatically; you do not need to redo Step 8 unless the token is revoked.
 
 ## File layout reference
 
@@ -110,10 +126,10 @@ The next run will pop the OAuth window again.
 **No emails arriving after several minutes**
 - The default query is `is:unread -in:chats newer_than:1d`. Send yourself an email from another account so it lands as unread.
 - Check that the Gmail account you authorized is the one receiving the test email.
-- Loom polls every 30 seconds by default; wait one full cycle.
+- Loom polls every 10 seconds by default; wait one full cycle.
 
 **Want to start fresh**
-Delete the whole credentials dir and redo Steps 4–7:
+Delete the whole credentials dir and redo Steps 4–8:
 ```bash
 rm ~/.loom/credentials/gmail-client-secrets.json
 rm ~/.loom/credentials/gmail-token.json

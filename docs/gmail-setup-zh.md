@@ -4,7 +4,7 @@
 
 ## 前置条件
 
-- Python 3.11+
+- Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/)
 - 一个 Gmail 账号
 - macOS 或 Linux（Windows 用户请把 `~` 替换成 `%USERPROFILE%`）
@@ -54,7 +54,7 @@ mkdir -p ~/.loom/credentials
 mv ~/Downloads/client_secret_*.json ~/.loom/credentials/gmail-client-secrets.json
 ```
 
-上面这个路径只是**推荐**的位置和命名，并非强制。`GmailAdaptor` 通过 `client_secrets_path` 参数显式接受凭据文件路径 —— 如果你放到别处，记得在启动 harness/CLI 时把对应路径传给 adaptor。
+上面这个路径是**推荐**的位置和命名。如果放到别处，在 `loom source add gmail` 时用 `--credentials` 指定实际路径即可。
 
 ## 第 6 步 — 安装 gmail extra
 
@@ -66,9 +66,25 @@ uv sync --extra gmail
 
 这会装上 `google-api-python-client`、`google-auth-oauthlib` 等依赖。
 
-## 第 7 步 — 首次运行（浏览器 OAuth 授权）
+## 第 7 步 — 把 Gmail 加入 Loom
 
-启动 adaptor（通过你的 harness 或 smoke 脚本）。首次运行时：
+```bash
+loom source add gmail --credentials ~/.loom/credentials/gmail-client-secrets.json
+```
+
+可选：通过 `--group` 把邮件归入某个 group（需先在 Config 编辑器里建好 group）：
+
+```bash
+loom source add gmail --credentials ~/.loom/credentials/gmail-client-secrets.json --group inbox
+```
+
+## 第 8 步 — 首次运行（浏览器 OAuth 授权）
+
+```bash
+loom up
+```
+
+首次运行时：
 
 1. 浏览器自动弹出。
 2. 选择你在 Test users 里加过的 Google 账号。
@@ -82,7 +98,7 @@ uv sync --extra gmail
 ~/.loom/credentials/gmail-token.json
 ```
 
-文件里存了 access token + refresh token。Loom 会自动刷新，你不需要再走第 7 步 —— 除非 token 被吊销。
+文件里存了 access token + refresh token。Loom 会自动刷新，你不需要再走第 8 步 —— 除非 token 被吊销。
 
 ## 文件布局参考
 
@@ -110,10 +126,10 @@ rm ~/.loom/credentials/gmail-token.json
 **等了几分钟没收到邮件**
 - 默认查询条件是 `is:unread -in:chats newer_than:1d`。从另一个账号给自己发一封，确保是未读状态。
 - 确认你授权的 Gmail 账号就是接收测试邮件的账号。
-- Loom 默认每 30 秒轮询一次，等一个完整周期。
+- Loom 默认每 10 秒轮询一次，等一个完整周期。
 
 **想完全重置**
-删掉整个凭据目录，重新走第 4–7 步：
+删掉整个凭据目录，重新走第 4–8 步：
 ```bash
 rm ~/.loom/credentials/gmail-client-secrets.json
 rm ~/.loom/credentials/gmail-token.json
