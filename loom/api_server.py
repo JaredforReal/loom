@@ -76,9 +76,43 @@ async def get_status():
 
 
 @app.get("/api/envelopes")
-async def list_envelopes(source: str | None = None, group: str | None = None, limit: int = 50):
+async def list_envelopes(
+    source: str | None = None,
+    group: str | None = None,
+    source_id_prefix: str | None = None,
+    limit: int = 50,
+):
     ctx = _ctx()
-    envelopes = await ctx.mailbox.list_envelopes(source=source, group=group, limit=limit)
+
+    # When filtering by group, resolve to source_id_prefixes from current config
+    # so moving sources in/out of groups takes immediate effect.
+    if group is not None:
+        prefixes: list[str] = []
+        for src in ctx.config.sources:
+            if src.get("group") != group:
+                continue
+            kind = src.get("kind", "")
+            if kind == "github" and "owner" in src and "repo" in src:
+                prefixes.append(f"{src['owner']}/{src['repo']}")
+        if prefixes:
+            envelopes = await ctx.store.query_envelopes(
+                source_id_prefixes=prefixes,
+                limit=limit,
+            )
+            return [_envelope_to_dict(e) for e in envelopes]
+        # Fallback to group field if no prefixes resolved
+        envelopes = await ctx.mailbox.list_envelopes(
+            group=group,
+            limit=limit,
+        )
+        return [_envelope_to_dict(e) for e in envelopes]
+
+    envelopes = await ctx.mailbox.list_envelopes(
+        source=source,
+        group=group,
+        source_id_prefix=source_id_prefix,
+        limit=limit,
+    )
     return [_envelope_to_dict(e) for e in envelopes]
 
 

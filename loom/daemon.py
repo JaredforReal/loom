@@ -272,58 +272,6 @@ async def _restore_adaptor_seen(ad: BaseAdaptor, store: Store) -> None:
         logger.info("Restored %d seen IDs for %s adaptor", len(seen_ids), ad.name)
 
 
-async def _backfill_groups(store: Store, sources: list[dict]) -> None:
-    """Sync envelope group values to match the current source config.
-
-    If a source has ``group`` set in config but existing envelopes still carry
-    an empty or auto-assigned group (e.g. ``owner/repo``), update them so that
-    group-based filtering in the WebUI works.
-    """
-    from sqlalchemy import text as sa_text
-
-    for src in sources:
-        kind = src.get("kind", "")
-        group = src.get("group", "")
-        if not group:
-            continue
-
-        if kind == "github" and "owner" in src and "repo" in src:
-            owner_repo = f"{src['owner']}/{src['repo']}"
-            async with store._session() as session:
-                result = await session.execute(
-                    sa_text(
-                        'UPDATE envelopes SET "group" = :grp '
-                        'WHERE source_id LIKE :prefix AND "group" != :grp'
-                    ),
-                    {"grp": group, "prefix": f"{owner_repo}#%"},
-                )
-                await session.commit()
-                if result.rowcount:
-                    logger.info(
-                        "Backfilled group '%s' on %d envelopes for %s",
-                        group,
-                        result.rowcount,
-                        owner_repo,
-                    )
-
-        elif kind == "rss" and "url" in src:
-            from urllib.parse import urlparse
-
-            host = urlparse(src["url"]).hostname or src["url"]
-            async with store._session() as session:
-                result = await session.execute(
-                    sa_text(
-                        'UPDATE envelopes SET "group" = :grp '
-                        "WHERE source = 'rss' AND \"group\" != :grp "
-                        'AND ("group" = \'\' OR "group" = :host)'
-                    ),
-                    {"grp": group, "host": host},
-                )
-                await session.commit()
-                if result.rowcount:
-                    logger.info("Backfilled group '%s' on %d RSS envelopes", group, result.rowcount)
-
-
 async def _save_adaptor_seen(ad: BaseAdaptor, store: Store) -> None:
     seen_ids = ad.export_seen()
     if seen_ids:
@@ -403,9 +351,6 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         if isinstance(ad, GitHubAdaptor):
             await _restore_github_cursors(ad, store)
         await _restore_adaptor_seen(ad, store)
-
-    # Sync envelope groups to current config
-    await _backfill_groups(store, config.sources)
 
     # --- Set context (for WebUI access) ---
     ctx = DaemonContext(

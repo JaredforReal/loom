@@ -17,13 +17,14 @@ export default function App() {
     getDefaultSource()
   )
   const [groupFilter, setGroupFilter] = useState<string | null>(null)
+  const [sourceIdPrefix, setSourceIdPrefix] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
 
   const { data: envelopes = [] } = useQuery({
-    queryKey: ["envelopes", sourceFilter, groupFilter],
+    queryKey: ["envelopes", sourceFilter, groupFilter, sourceIdPrefix],
     queryFn: () =>
-      listEnvelopes(sourceFilter ?? undefined, groupFilter ?? undefined),
+      listEnvelopes(sourceFilter ?? undefined, groupFilter ?? undefined, sourceIdPrefix ?? undefined),
     refetchInterval: 7_000,
     enabled: view === "inbox",
   })
@@ -35,14 +36,23 @@ export default function App() {
         onViewChange={setView}
         sourceFilter={sourceFilter}
         groupFilter={groupFilter}
+        sourceIdPrefix={sourceIdPrefix}
         onSourceFilter={(src) => {
           setSourceFilter(src)
           setGroupFilter(null)
+          setSourceIdPrefix(null)
           setView("inbox")
         }}
         onGroupFilter={(grp) => {
           setGroupFilter(grp)
           setSourceFilter(null)
+          setSourceIdPrefix(null)
+          setView("inbox")
+        }}
+        onSourceIdPrefix={(prefix) => {
+          setSourceIdPrefix(prefix)
+          setSourceFilter(null)
+          setGroupFilter(null)
           setView("inbox")
         }}
         showArchived={showArchived}

@@ -12,7 +12,7 @@ interface ConfigEditorProps {
 }
 
 export function ConfigEditor({ value, onChange }: ConfigEditorProps) {
-  const [mode, setMode] = useState<Mode>("yaml")
+  const [mode, setMode] = useState<Mode>("form")
 
   return (
     <div className="flex h-full flex-col">

@@ -123,13 +123,13 @@ class Store:
             await conn.execute(
                 text("UPDATE envelopes SET status = 'in_review' WHERE status = 'waiting_approval'")
             )
-            # Migrate: backfill group from source_id for GitHub envelopes
+            # Migrate: reset GitHub envelope groups to source_id-derived value
+            # (undoes any stale backfill from previous daemon runs)
             await conn.execute(
                 text(
                     'UPDATE envelopes SET "group" = '
                     "substr(source_id, 1, instr(source_id, '#') - 1) "
-                    "WHERE source = 'github' AND \"group\" = '' "
-                    "AND source_id LIKE '%#%'"
+                    "WHERE source = 'github' AND source_id LIKE '%#%'"
                 )
             )
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
@@ -168,6 +168,8 @@ class Store:
         source: str | None = None,
         status: EnvelopeStatus | None = None,
         group: str | None = None,
+        source_id_prefix: str | None = None,
+        source_id_prefixes: list[str] | None = None,
         limit: int = 50,
     ) -> list[Envelope]:
         """Query envelopes with optional filters, newest first."""
@@ -179,6 +181,14 @@ class Store:
                 stmt = stmt.where(EnvelopeRow.status == str(status))
             if group is not None:
                 stmt = stmt.where(EnvelopeRow.group == group)
+            if source_id_prefix is not None:
+                stmt = stmt.where(EnvelopeRow.source_id.startswith(source_id_prefix))
+            if source_id_prefixes:
+                from sqlalchemy import or_
+
+                stmt = stmt.where(
+                    or_(*(EnvelopeRow.source_id.startswith(p) for p in source_id_prefixes))
+                )
             stmt = stmt.limit(limit)
             result = await session.execute(stmt)
             rows = result.scalars().all()
