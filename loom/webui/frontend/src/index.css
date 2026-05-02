@@ -24,7 +24,7 @@
     --radius: 0.5rem;
     --status-queue: 215 16% 57%;
     --status-processing: 221 83% 53%;
-    --status-waiting: 38 92% 50%;
+    --status-review: 38 92% 50%;
     --status-done: 142 71% 45%;
   }
 
@@ -48,7 +48,7 @@
     --ring: 212.7 26.8% 83.9%;
     --status-queue: 215 14% 52%;
     --status-processing: 221 73% 58%;
-    --status-waiting: 38 85% 55%;
+    --status-review: 38 85% 55%;
     --status-done: 142 61% 50%;
   }
 }

@@ -32,7 +32,7 @@ LOOM_THEME = Theme(
         # Status
         "status.pending": "#c0c0c0",
         "status.processing": "#ffd700",
-        "status.waiting": "bold #ffb347",
+        "status.review": "bold #ffb347",
         "status.done": "green",
         "status.dismissed": "grey42",
         "status.failed": "bold red",
@@ -70,7 +70,7 @@ def make_console() -> Console:
 STATUS_GLYPH: dict[EnvelopeStatus, str] = {
     EnvelopeStatus.PENDING: "●",
     EnvelopeStatus.PROCESSING: "◐",
-    EnvelopeStatus.WAITING_APPROVAL: "◑",
+    EnvelopeStatus.IN_REVIEW: "◑",
     EnvelopeStatus.DONE: "✓",
     EnvelopeStatus.DISMISSED: "✗",
     EnvelopeStatus.FAILED: "✗",
@@ -79,7 +79,7 @@ STATUS_GLYPH: dict[EnvelopeStatus, str] = {
 STATUS_STYLE: dict[EnvelopeStatus, str] = {
     EnvelopeStatus.PENDING: "status.pending",
     EnvelopeStatus.PROCESSING: "status.processing",
-    EnvelopeStatus.WAITING_APPROVAL: "status.waiting",
+    EnvelopeStatus.IN_REVIEW: "status.review",
     EnvelopeStatus.DONE: "status.done",
     EnvelopeStatus.DISMISSED: "status.dismissed",
     EnvelopeStatus.FAILED: "status.failed",

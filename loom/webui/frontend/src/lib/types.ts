@@ -1,7 +1,7 @@
 export type EnvelopeStatus =
   | "pending"
   | "processing"
-  | "waiting_approval"
+  | "in_review"
   | "done"
   | "dismissed"
   | "failed"

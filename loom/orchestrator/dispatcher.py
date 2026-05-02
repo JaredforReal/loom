@@ -309,10 +309,8 @@ class Dispatcher:
                 envelope.metadata["cli_session_id"] = session.cli_session_id
             if session.cwd:
                 envelope.metadata["session_cwd"] = session.cwd
-            await self._mailbox.save_and_transition(envelope, EnvelopeStatus.WAITING_APPROVAL)
-            logger.info(
-                "Envelope %s -> WAITING_APPROVAL (session %s completed)", envelope.id, session.id
-            )
+            await self._mailbox.save_and_transition(envelope, EnvelopeStatus.IN_REVIEW)
+            logger.info("Envelope %s -> IN_REVIEW (session %s completed)", envelope.id, session.id)
 
         elif session.status == SessionStatus.FAILED:
             envelope.agent_summary = f"Session failed: {session.error}"

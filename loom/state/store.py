@@ -119,6 +119,10 @@ class Store:
                 )
             except Exception:
                 pass  # Column already exists
+            # Migrate: rename old status value waiting_approval -> in_review
+            await conn.execute(
+                text("UPDATE envelopes SET status = 'in_review' WHERE status = 'waiting_approval'")
+            )
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         logger.info("Store initialized at %s", self._db_path)
 
@@ -172,7 +176,7 @@ class Store:
             return [_row_to_envelope(r) for r in rows]
 
     async def get_unread_counts(self, source: str | None = None) -> dict[str, int]:
-        """Return {source: count} for pending/waiting_approval envelopes."""
+        """Return {source: count} for pending/in_review envelopes."""
         async with self._session() as session:
             stmt = (
                 select(EnvelopeRow.source, func.count(EnvelopeRow.id))
@@ -180,7 +184,7 @@ class Store:
                     EnvelopeRow.status.in_(
                         [
                             str(EnvelopeStatus.PENDING),
-                            str(EnvelopeStatus.WAITING_APPROVAL),
+                            str(EnvelopeStatus.IN_REVIEW),
                         ]
                     )
                 )

@@ -71,7 +71,7 @@ export function ActionsPanel({ envelope }: ActionsPanelProps) {
   if (!envelope) return null
 
   const sourceUrl = extractSourceUrl(envelope)
-  const canApprove = envelope.status === "waiting_approval"
+  const canApprove = envelope.status === "in_review"
   const isTerminal =
     envelope.status === "done" ||
     envelope.status === "dismissed" ||

@@ -27,7 +27,7 @@ def _run(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, str]
 def _make_envelope(
     source: str = "github",
     title: str = "Demo issue",
-    status: EnvelopeStatus = EnvelopeStatus.WAITING_APPROVAL,
+    status: EnvelopeStatus = EnvelopeStatus.IN_REVIEW,
     priority: int = 2,
 ) -> Envelope:
     return Envelope(
@@ -158,14 +158,14 @@ class TestStatus:
     def test_shows_counts(self, isolated_loom: Path, capsys: pytest.CaptureFixture[str]) -> None:
         envs = [
             _make_envelope(status=EnvelopeStatus.PENDING),
-            _make_envelope(status=EnvelopeStatus.WAITING_APPROVAL),
-            _make_envelope(status=EnvelopeStatus.WAITING_APPROVAL),
+            _make_envelope(status=EnvelopeStatus.IN_REVIEW),
+            _make_envelope(status=EnvelopeStatus.IN_REVIEW),
         ]
         asyncio.run(_seed(isolated_loom / "data" / "loom.db", envs))
         code, out = _run(["status"], capsys)
         assert code == 0
         assert "queued 1" in out
-        assert "waiting_approval" in out
+        assert "in_review" in out
 
 
 class TestDoctor:

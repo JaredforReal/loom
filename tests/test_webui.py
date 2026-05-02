@@ -91,14 +91,14 @@ class TestEnvelopes:
             body="hi",
         )
         await webui_ctx.mailbox.receive(env)
-        await webui_ctx.mailbox.update_status(env.id, EnvelopeStatus.WAITING_APPROVAL)
+        await webui_ctx.mailbox.update_status(env.id, EnvelopeStatus.IN_REVIEW)
 
         r = client.get("/api/envelopes")
         assert r.status_code == 200
         items = r.json()
         assert len(items) == 1
         assert items[0]["id"] == env.id
-        assert items[0]["status"] == "waiting_approval"
+        assert items[0]["status"] == "in_review"
 
         r = client.post(f"/api/envelopes/{env.id}/dismiss")
         assert r.status_code == 200

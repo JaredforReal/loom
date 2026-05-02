@@ -38,7 +38,7 @@ class TestSaveAndTransition:
         assert loaded.agent_summary == "Summarized: this is important"
         assert loaded.proposed_action == {"auto_approved": True, "result": "ok"}
 
-    async def test_agent_log_persisted_on_waiting_approval(self, mailbox: Mailbox) -> None:
+    async def test_agent_log_persisted_on_in_review(self, mailbox: Mailbox) -> None:
         env = Envelope(source="gmail", title="test", body="body")
         await mailbox.receive(env)
 
@@ -51,11 +51,11 @@ class TestSaveAndTransition:
                 "timestamp": "2024-01-01T00:00:00",
             }
         ]
-        await mailbox.save_and_transition(env, EnvelopeStatus.WAITING_APPROVAL)
+        await mailbox.save_and_transition(env, EnvelopeStatus.IN_REVIEW)
 
         loaded = await mailbox._store.get_envelope(env.id)
         assert loaded is not None
-        assert loaded.status == EnvelopeStatus.WAITING_APPROVAL
+        assert loaded.status == EnvelopeStatus.IN_REVIEW
         assert loaded.agent_summary == "Email needs your review"
         assert len(loaded.agent_log) == 1
         assert loaded.agent_log[0]["step"] == "triage"

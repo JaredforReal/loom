@@ -78,11 +78,11 @@ class TestSaveAndGetEnvelope:
         assert loaded.body == "Test body"
 
     async def test_status_preserved(self, store: Store) -> None:
-        env = _make_envelope(status=EnvelopeStatus.WAITING_APPROVAL)
+        env = _make_envelope(status=EnvelopeStatus.IN_REVIEW)
         await store.save_envelope(env)
         loaded = await store.get_envelope(env.id)
         assert loaded is not None
-        assert loaded.status == EnvelopeStatus.WAITING_APPROVAL
+        assert loaded.status == EnvelopeStatus.IN_REVIEW
 
     async def test_priority_preserved(self, store: Store) -> None:
         env = _make_envelope(priority=3)
@@ -197,9 +197,7 @@ class TestQueryEnvelopes:
 class TestGetUnreadCounts:
     async def test_counts_pending_and_waiting(self, store: Store) -> None:
         await store.save_envelope(_make_envelope(source="github", status=EnvelopeStatus.PENDING))
-        await store.save_envelope(
-            _make_envelope(source="github", status=EnvelopeStatus.WAITING_APPROVAL)
-        )
+        await store.save_envelope(_make_envelope(source="github", status=EnvelopeStatus.IN_REVIEW))
         await store.save_envelope(_make_envelope(source="github", status=EnvelopeStatus.DONE))
         counts = await store.get_unread_counts()
         assert counts.get("github") == 2

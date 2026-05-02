@@ -9,8 +9,10 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 export const getStatus = () => jsonFetch<DaemonStatus>("/api/status")
 
 export const listEnvelopes = (source?: string) => {
-  const qs = source ? `?source=${encodeURIComponent(source)}` : ""
-  return jsonFetch<Envelope[]>(`/api/envelopes${qs}`)
+  const params = new URLSearchParams()
+  if (source) params.set("source", source)
+  params.set("limit", "10000")
+  return jsonFetch<Envelope[]>(`/api/envelopes?${params}`)
 }
 
 export const getEnvelope = (id: string) =>
