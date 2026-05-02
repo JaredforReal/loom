@@ -599,8 +599,15 @@ def _add_gmail_source(config: LoomConfig, args: argparse.Namespace) -> None:
 def _add_rss_source(config: LoomConfig, args: argparse.Namespace) -> None:
     if not args.url:
         _die("--url is required for RSS sources")
-    config.sources.append({"kind": "rss", "url": args.url})
-    print(f"RSS source saved: {args.url}")
+    config.sources.append(
+        {
+            "kind": "rss",
+            "url": args.url,
+            "poll_interval": args.interval,
+        }
+    )
+    print(f"RSS source saved: {args.url} (interval={args.interval}s)")
+    print("Run `loom daemon` to start monitoring.")
 
 
 def _add_anet_source(config: LoomConfig, args: argparse.Namespace) -> None:
