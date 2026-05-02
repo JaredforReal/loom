@@ -214,10 +214,8 @@ class Dispatcher:
         # Store result on the envelope
         envelope.agent_summary = result
         envelope.proposed_action = {"auto_approved": True, "result": result}
-        await self._mailbox.update_status(envelope.id, EnvelopeStatus.DONE)
+        await self._mailbox.save_and_transition(envelope, EnvelopeStatus.DONE)
 
-    # ------------------------------------------------------------------
-    # Prompt builders
     # ------------------------------------------------------------------
 
     def _build_system_prompt(self, envelope: Envelope, action: PolicyAction) -> str:
@@ -285,12 +283,12 @@ class Dispatcher:
                 {"step": s.step, "input": s.input, "output": s.output, "timestamp": s.timestamp}
                 for s in session.steps
             ]
-            await self._mailbox.update_status(envelope.id, EnvelopeStatus.WAITING_APPROVAL)
+            await self._mailbox.save_and_transition(envelope, EnvelopeStatus.WAITING_APPROVAL)
             logger.info(
                 "Envelope %s -> WAITING_APPROVAL (session %s completed)", envelope.id, session.id
             )
 
         elif session.status == SessionStatus.FAILED:
             envelope.agent_summary = f"Session failed: {session.error}"
-            await self._mailbox.update_status(envelope.id, EnvelopeStatus.FAILED)
+            await self._mailbox.save_and_transition(envelope, EnvelopeStatus.FAILED)
             logger.error("Envelope %s -> FAILED (session %s)", envelope.id, session.id)
