@@ -113,7 +113,7 @@ export function ActionsPanel({ envelope }: ActionsPanelProps) {
             <button
               type="button"
               onClick={() => {
-                navigator.clipboard.writeText(`claude -r ${sessionInfo.cli_session_id}`)
+                navigator.clipboard.writeText(`${sessionInfo.cwd ? `cd ${sessionInfo.cwd} && ` : ""}claude -r ${sessionInfo.cli_session_id}`)
                 toast.success("Copied resume command")
               }}
               className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
