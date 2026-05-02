@@ -145,6 +145,7 @@ class SessionManager:
         max_turns: int | None = None,
         skills: list[str] | None = None,
         cwd: str | None = None,
+        permission_mode: str | None = None,
     ) -> Session:
         """Spawn a new interactive Claude Code session for the given envelope.
 
@@ -156,6 +157,8 @@ class SessionManager:
             "Never execute actions directly. Always present your analysis for user approval."
         )
 
+        effective_permission_mode = permission_mode or "auto"
+
         options = ClaudeAgentOptions(
             system_prompt=effective_system_prompt,
             allowed_tools=allowed_tools or [],
@@ -163,6 +166,7 @@ class SessionManager:
             max_turns=max_turns,
             skills=skills,
             cwd=cwd,
+            permission_mode=effective_permission_mode,
         )
 
         session = Session(
@@ -260,13 +264,55 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session is None or session._client is None:
             return False
+        client = session._client
         try:
-            await session._client.query(message)
-            asyncio.create_task(self._run_session(session, ""))
+            await client.query(message)
+
+            # Collect response inline — do NOT delegate to _run_session
+            # which would re-send an empty query.
+            async for msg in client.receive_response():
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock):
+                            session.steps.append(
+                                AgentStep(
+                                    step="assistant",
+                                    output=block.text,
+                                    timestamp=datetime.utcnow().isoformat(),
+                                )
+                            )
+                        elif isinstance(block, ToolUseBlock):
+                            session.steps.append(
+                                AgentStep(
+                                    step=f"tool:{block.name}",
+                                    input=str(block.input),
+                                    timestamp=datetime.utcnow().isoformat(),
+                                )
+                            )
+                elif isinstance(msg, ResultMessage):
+                    session.result = "\n".join(
+                        s.output for s in session.steps if s.step == "assistant"
+                    )
+                    if msg.total_cost_usd:
+                        session.total_cost_usd = msg.total_cost_usd
+
+            session.status = SessionStatus.COMPLETED
+            session.completed_at = datetime.utcnow()
             return True
         except Exception as exc:
             logger.error("Follow-up failed for session %s: %s", session_id, exc)
+            session.status = SessionStatus.FAILED
+            session.error = str(exc)
             return False
+        finally:
+            if session._client is not None:
+                await client.disconnect()
+                session._client = None
+            if self._on_complete:
+                try:
+                    await self._on_complete(session)
+                except Exception:
+                    logger.exception("on_complete callback failed for session %s", session.id)
 
     # ------------------------------------------------------------------
     # Cancel / interrupt
@@ -300,6 +346,7 @@ class SessionManager:
         max_turns: int | None = None,
         skills: list[str] | None = None,
         cwd: str | None = None,
+        permission_mode: str | None = None,
     ) -> str:
         """Run a one-shot ``query()`` and return the assistant text.
 
@@ -308,6 +355,8 @@ class SessionManager:
         """
         from claude_agent_sdk import query as sdk_query
 
+        effective_permission_mode = permission_mode or "bypassPermissions"
+
         options = ClaudeAgentOptions(
             system_prompt=system_prompt,
             allowed_tools=allowed_tools or [],
@@ -315,6 +364,7 @@ class SessionManager:
             model=model,
             skills=skills,
             cwd=cwd,
+            permission_mode=effective_permission_mode,
         )
 
         texts: list[str] = []
