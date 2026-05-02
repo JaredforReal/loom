@@ -38,6 +38,7 @@ class RSSSourceConfig:
     url: str
     poll_interval: int = DEFAULT_POLL_INTERVAL
     title_filter: list[str] = field(default_factory=list)  # keywords to include
+    group: str = ""
 
 
 class RSSAdaptor(BaseAdaptor):
@@ -170,6 +171,7 @@ class RSSAdaptor(BaseAdaptor):
                     "feed_title": feed_title,
                 }
             )
+            envelope.group = config.group
 
             # Dedup: skip if we've already processed this source_id
             if envelope.source_id in self._seen_ids:
@@ -268,3 +270,9 @@ class RSSAdaptor(BaseAdaptor):
     async def execute_action(self, envelope: Envelope, action: dict) -> None:
         """RSS is a read-only source — no actions to execute."""
         logger.debug("RSS adaptor received action request (read-only, ignoring): %s", action)
+
+    def export_seen(self) -> list[str]:
+        return list(self._seen_ids)
+
+    def restore_seen(self, entries: list[str]) -> None:
+        self._seen_ids.update(e for e in entries if isinstance(e, str))

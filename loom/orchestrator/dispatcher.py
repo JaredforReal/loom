@@ -16,6 +16,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from loom.config import GroupConfig, LoomConfig
 from loom.core.envelope import Envelope, EnvelopeStatus
 from loom.core.eventbus import EventBus
 from loom.orchestrator.policy import PolicyAction, PolicyEngine
@@ -52,12 +53,14 @@ class Dispatcher:
         policy_engine: PolicyEngine,
         mailbox: Mailbox,
         agent_enabled: bool = True,
+        config: LoomConfig | None = None,
     ) -> None:
         self._bus = bus
         self._sessions = session_mgr
         self._policy = policy_engine
         self._mailbox = mailbox
         self._agent_enabled = agent_enabled
+        self._config = config
         self._drain_task: asyncio.Task | None = None
 
     @property
@@ -107,6 +110,20 @@ class Dispatcher:
     async def _try_dispatch(self, envelope: Envelope) -> None:
         """Evaluate envelope against policy and dispatch if matched."""
         action = self._policy.evaluate(envelope)
+
+        # Fallback: use group defaults if no policy rule matched
+        if action is None and envelope.group and self._config:
+            grp: GroupConfig | None = self._config.groups.get(envelope.group)
+            if grp and (grp.prompt or grp.system_prompt or grp.auto_approve):
+                action = PolicyAction(
+                    prompt=grp.prompt,
+                    system_prompt=grp.system_prompt,
+                    skills=grp.skills,
+                    tools=grp.tools,
+                    model=grp.model,
+                    max_turns=grp.max_turns,
+                    auto_approve=grp.auto_approve,
+                )
 
         if action is None:
             logger.info("No matching policy rule for envelope %s — skipping", envelope.id)

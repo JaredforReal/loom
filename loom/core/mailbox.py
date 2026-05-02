@@ -53,10 +53,13 @@ class Mailbox:
         self,
         source: str | None = None,
         status: EnvelopeStatus | None = None,
+        group: str | None = None,
         limit: int = 50,
     ) -> list[Envelope]:
         """Query envelopes with optional filters."""
-        return await self._store.query_envelopes(source=source, status=status, limit=limit)
+        return await self._store.query_envelopes(
+            source=source, status=status, group=group, limit=limit
+        )
 
     async def get_unread_count(self, source: str | None = None) -> dict[str, int]:
         """Get unread counts, optionally grouped by source."""

@@ -37,10 +37,25 @@ class PathSettings:
 
 
 @dataclass
+class GroupConfig:
+    """Shared policy defaults for a named collection of sources."""
+
+    name: str
+    prompt: str = ""
+    system_prompt: str = ""
+    skills: list[str] = field(default_factory=list)
+    tools: list[str] = field(default_factory=list)
+    model: str = ""
+    max_turns: int | None = None
+    auto_approve: bool = False
+
+
+@dataclass
 class LoomConfig:
     daemon: DaemonSettings = field(default_factory=DaemonSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
     sources: list[dict[str, Any]] = field(default_factory=list)
+    groups: dict[str, GroupConfig] = field(default_factory=dict)
     paths: PathSettings = field(default_factory=PathSettings)
 
 
@@ -97,7 +112,12 @@ def load_config(path: Path | None = None) -> LoomConfig:
         if isinstance(s, dict) and "kind" in s:
             sources.append(_expand_paths(s))
 
-    return LoomConfig(daemon=daemon, agent=agent, sources=sources, paths=paths)
+    groups = {}
+    for name, gcfg in raw.get("groups", {}).items():
+        if isinstance(gcfg, dict):
+            groups[name] = GroupConfig(name=name, **gcfg)
+
+    return LoomConfig(daemon=daemon, agent=agent, sources=sources, groups=groups, paths=paths)
 
 
 def save_config(config: LoomConfig, path: Path | None = None) -> None:
@@ -111,19 +131,36 @@ def save_config(config: LoomConfig, path: Path | None = None) -> None:
     }
     if config.daemon.proxy:
         daemon_dict["proxy"] = config.daemon.proxy
-    data = {
+    data: dict[str, Any] = {
         "daemon": daemon_dict,
         "agent": {
             "max_concurrent": config.agent.max_concurrent,
             "model": config.agent.model,
         },
         "sources": config.sources,
-        "paths": {
-            "policies_dir": str(config.paths.policies_dir),
-            "prompts_dir": str(config.paths.prompts_dir),
-            "data_dir": str(config.paths.data_dir),
-            "credentials_dir": str(config.paths.credentials_dir),
-        },
+    }
+    if config.groups:
+        data["groups"] = {
+            name: {
+                k: v
+                for k, v in {
+                    "prompt": g.prompt,
+                    "system_prompt": g.system_prompt,
+                    "skills": g.skills,
+                    "tools": g.tools,
+                    "model": g.model,
+                    "max_turns": g.max_turns,
+                    "auto_approve": g.auto_approve,
+                }.items()
+                if v  # omit empty/falsy defaults
+            }
+            for name, g in config.groups.items()
+        }
+    data["paths"] = {
+        "policies_dir": str(config.paths.policies_dir),
+        "prompts_dir": str(config.paths.prompts_dir),
+        "data_dir": str(config.paths.data_dir),
+        "credentials_dir": str(config.paths.credentials_dir),
     }
 
     config_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))

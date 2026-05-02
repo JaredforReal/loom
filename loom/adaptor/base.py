@@ -57,6 +57,13 @@ class BaseAdaptor(ABC):
     async def execute_action(self, envelope: Envelope, action: dict) -> None:
         """Execute an approved action back to the external source."""
 
+    def export_seen(self) -> list[str]:
+        """Return seen IDs for external persistence. Override in adaptors with seen-sets."""
+        return []
+
+    def restore_seen(self, entries: list[str]) -> None:
+        """Restore seen IDs from previous run. Override in adaptors with seen-sets."""
+
     @property
     def is_running(self) -> bool:
         return False

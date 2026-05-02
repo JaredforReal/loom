@@ -1,6 +1,6 @@
 """Tests for ``loom.adaptor.gmail``.
 
-These tests stub out ``googleapiclient`` and OAuth entirely — no network. They
+These tests stub out httpx and OAuth entirely — no network. They
 cover the helpers (`_extract_header`, `_walk_parts`, `_decode_body`),
 `normalize`, the seen-set export/restore API, `_poll_once`, and `execute_action`.
 """
@@ -10,8 +10,9 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 from loom.adaptor.gmail import (
@@ -95,6 +96,15 @@ def _build_adaptor_with_recorder(
 
     ad.set_callback(recorder)
     return ad, received
+
+
+def _mock_httpx_client() -> httpx.AsyncClient:
+    """Create a mock httpx.AsyncClient for testing."""
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get = AsyncMock()
+    client.post = AsyncMock()
+    client.aclose = AsyncMock()
+    return client  # type: ignore[return-value]
 
 
 # ===========================================================================
@@ -277,7 +287,7 @@ class TestExecuteAction:
     @pytest.mark.asyncio
     async def test_unknown_type(self, tmp_path):
         ad = _build_adaptor(tmp_path)
-        ad._service = MagicMock()
+        ad._client = _mock_httpx_client()
         env = Envelope(source="gmail", source_id="x")
         with pytest.raises(ValueError, match="Unknown gmail action type"):
             await ad.execute_action(env, {"type": "fly_to_moon"})
@@ -285,8 +295,8 @@ class TestExecuteAction:
     @pytest.mark.asyncio
     async def test_reply_threads_correctly(self, tmp_path):
         ad = _build_adaptor(tmp_path)
-        service = MagicMock()
-        ad._service = service
+        client = _mock_httpx_client()
+        ad._client = client
 
         env = Envelope(
             source="gmail",
@@ -301,9 +311,10 @@ class TestExecuteAction:
         )
         await ad.execute_action(env, {"type": "reply", "body": "Hi back"})
 
-        send = service.users.return_value.messages.return_value.send
-        send.assert_called_once()
-        body = send.call_args.kwargs["body"]
+        client.post.assert_called_once()
+        call_args = client.post.call_args
+        assert call_args[0][0] == "/gmail/v1/users/me/messages/send"
+        body = call_args[1]["json"]
         assert body["threadId"] == "thread-xyz"
         raw = base64.urlsafe_b64decode(body["raw"]).decode("utf-8")
         assert "To: bob@example.com" in raw
@@ -315,7 +326,8 @@ class TestExecuteAction:
     @pytest.mark.asyncio
     async def test_reply_does_not_double_re_prefix(self, tmp_path):
         ad = _build_adaptor(tmp_path)
-        ad._service = MagicMock()
+        client = _mock_httpx_client()
+        ad._client = client
         env = Envelope(
             source="gmail",
             source_id="msg-1",
@@ -323,60 +335,57 @@ class TestExecuteAction:
             metadata={"from": "bob@example.com", "thread_id": "t"},
         )
         await ad.execute_action(env, {"type": "reply", "body": "ack"})
-        send = ad._service.users.return_value.messages.return_value.send
-        raw = base64.urlsafe_b64decode(send.call_args.kwargs["body"]["raw"]).decode("utf-8")
+        raw = base64.urlsafe_b64decode(client.post.call_args[1]["json"]["raw"]).decode("utf-8")
         assert "Subject: Re: Already a reply" in raw
         assert "Subject: Re: Re:" not in raw
 
     @pytest.mark.asyncio
     async def test_reply_explicit_to_overrides_from(self, tmp_path):
         ad = _build_adaptor(tmp_path)
-        ad._service = MagicMock()
+        client = _mock_httpx_client()
+        ad._client = client
         env = Envelope(
             source="gmail",
             source_id="msg-1",
             metadata={"from": "noreply@example.com"},
         )
         await ad.execute_action(env, {"type": "reply", "body": "ok", "to": "human@example.com"})
-        send = ad._service.users.return_value.messages.return_value.send
-        raw = base64.urlsafe_b64decode(send.call_args.kwargs["body"]["raw"]).decode("utf-8")
+        raw = base64.urlsafe_b64decode(client.post.call_args[1]["json"]["raw"]).decode("utf-8")
         assert "To: human@example.com" in raw
 
     @pytest.mark.asyncio
     async def test_archive_removes_inbox_label(self, tmp_path):
         ad = _build_adaptor(tmp_path)
-        service = MagicMock()
-        ad._service = service
+        client = _mock_httpx_client()
+        ad._client = client
         env = Envelope(source="gmail", source_id="msg-1")
         await ad.execute_action(env, {"type": "archive"})
-        service.users.return_value.messages.return_value.modify.assert_called_once_with(
-            userId="me",
-            id="msg-1",
-            body={"addLabelIds": [], "removeLabelIds": ["INBOX"]},
+        client.post.assert_called_once_with(
+            "/gmail/v1/users/me/messages/msg-1/modify",
+            json={"addLabelIds": [], "removeLabelIds": ["INBOX"]},
         )
 
     @pytest.mark.asyncio
     async def test_label_adds_labels(self, tmp_path):
         ad = _build_adaptor(tmp_path)
-        service = MagicMock()
-        ad._service = service
+        client = _mock_httpx_client()
+        ad._client = client
         env = Envelope(source="gmail", source_id="msg-1")
         await ad.execute_action(env, {"type": "label", "labels": ["IMPORTANT", "STARRED"]})
-        service.users.return_value.messages.return_value.modify.assert_called_once_with(
-            userId="me",
-            id="msg-1",
-            body={"addLabelIds": ["IMPORTANT", "STARRED"], "removeLabelIds": []},
+        client.post.assert_called_once_with(
+            "/gmail/v1/users/me/messages/msg-1/modify",
+            json={"addLabelIds": ["IMPORTANT", "STARRED"], "removeLabelIds": []},
         )
 
     @pytest.mark.asyncio
     async def test_trash(self, tmp_path):
         ad = _build_adaptor(tmp_path)
-        service = MagicMock()
-        ad._service = service
+        client = _mock_httpx_client()
+        ad._client = client
         env = Envelope(source="gmail", source_id="msg-1")
         await ad.execute_action(env, {"type": "trash"})
-        service.users.return_value.messages.return_value.trash.assert_called_once_with(
-            userId="me", id="msg-1"
+        client.post.assert_called_once_with(
+            "/gmail/v1/users/me/messages/msg-1/trash",
         )
 
 
@@ -392,20 +401,24 @@ class TestPolling:
     async def test_ingests_new_messages_and_records_seen(self, tmp_path):
         ad, received = _build_adaptor_with_recorder(tmp_path)
 
-        service = MagicMock()
-        service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
-            "messages": [{"id": "a"}, {"id": "b"}],
-        }
-        fetched = {"a": _make_message("a"), "b": _make_message("b")}
+        client = _mock_httpx_client()
+        list_resp = MagicMock()
+        list_resp.json.return_value = {"messages": [{"id": "a"}, {"id": "b"}]}
+        client.get.return_value = list_resp
 
-        def get_call(*, userId: str, id: str, format: str) -> Any:  # noqa: N803 (Gmail API param)
-            del userId, format
-            m = MagicMock()
-            m.execute.return_value = fetched[id]
-            return m
+        async def mock_get(*args, **kwargs):
+            if "messages/a" in args[0]:
+                resp = MagicMock()
+                resp.json.return_value = _make_message("a")
+                return resp
+            elif "messages/b" in args[0]:
+                resp = MagicMock()
+                resp.json.return_value = _make_message("b")
+                return resp
+            return list_resp
 
-        service.users.return_value.messages.return_value.get.side_effect = get_call
-        ad._service = service
+        client.get = AsyncMock(side_effect=mock_get)
+        ad._client = client
 
         await ad._poll_once()
 
@@ -417,27 +430,30 @@ class TestPolling:
         ad, received = _build_adaptor_with_recorder(tmp_path)
         ad._record_seen("a")
 
-        service = MagicMock()
-        service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
-            "messages": [{"id": "a"}],
-        }
-        ad._service = service
+        client = _mock_httpx_client()
+        resp = MagicMock()
+        resp.json.return_value = {"messages": [{"id": "a"}]}
+        client.get.return_value = resp
+        ad._client = client
 
         await ad._poll_once()
 
         assert received == []
-        assert not service.users.return_value.messages.return_value.get.called
+        # Only called once for list, not for get
+        assert client.get.call_count == 1
 
     @pytest.mark.asyncio
     async def test_swallows_http_error_on_list(self, tmp_path):
-        from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
-
         ad = _build_adaptor(tmp_path)
-        service = MagicMock()
-        service.users.return_value.messages.return_value.list.return_value.execute.side_effect = (
-            HttpError(resp=MagicMock(status=500, reason="oops"), content=b"server err")
+        client = _mock_httpx_client()
+        client.get = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Server error",
+                request=MagicMock(),
+                response=MagicMock(status_code=500),
+            )
         )
-        ad._service = service
+        ad._client = client
 
         # Must not raise — adaptor logs and waits for next poll.
         await ad._poll_once()
@@ -446,22 +462,22 @@ class TestPolling:
     async def test_continues_when_one_message_fails(self, tmp_path):
         ad, received = _build_adaptor_with_recorder(tmp_path)
 
-        service = MagicMock()
-        service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
-            "messages": [{"id": "bad"}, {"id": "good"}],
-        }
+        client = _mock_httpx_client()
 
-        def get_call(*, userId: str, id: str, format: str) -> Any:  # noqa: N803 (Gmail API param)
-            del userId, format
-            m = MagicMock()
-            if id == "bad":
-                m.execute.side_effect = RuntimeError("bad message")
+        async def mock_get(*args, **kwargs):
+            if "messages/bad" in args[0]:
+                raise RuntimeError("bad message")
+            elif "messages/good" in args[0]:
+                resp = MagicMock()
+                resp.json.return_value = _make_message("good")
+                return resp
             else:
-                m.execute.return_value = _make_message("good")
-            return m
+                resp = MagicMock()
+                resp.json.return_value = {"messages": [{"id": "bad"}, {"id": "good"}]}
+                return resp
 
-        service.users.return_value.messages.return_value.get.side_effect = get_call
-        ad._service = service
+        client.get = AsyncMock(side_effect=mock_get)
+        ad._client = client
 
         await ad._poll_once()
 
@@ -470,7 +486,7 @@ class TestPolling:
         assert "bad" not in ad._seen_index
 
     @pytest.mark.asyncio
-    async def test_does_nothing_when_service_unset(self, tmp_path):
+    async def test_does_nothing_when_client_unset(self, tmp_path):
         ad = _build_adaptor(tmp_path)
-        # _service is None until start() runs — should be a no-op.
+        # _client is None until start() runs — should be a no-op.
         await ad._poll_once()

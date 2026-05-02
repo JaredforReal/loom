@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, func, select
+from sqlalchemy import Column, DateTime, Integer, String, Text, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -32,6 +32,7 @@ class EnvelopeRow(Base):
     status = Column(String, default="pending")
     priority = Column(Integer, default=1)
     labels = Column(Text, default="[]")
+    group = Column(String, index=True, default="")
     metadata_ = Column("metadata", Text, default="{}")
     agent_summary = Column(Text, default="")
     agent_log = Column(Text, default="[]")
@@ -58,6 +59,7 @@ def _row_to_envelope(row: EnvelopeRow) -> Envelope:
         status=EnvelopeStatus(row.status) if row.status else EnvelopeStatus.PENDING,
         priority=row.priority or 1,
         labels=json.loads(row.labels) if row.labels else [],
+        group=row.group or "",
         metadata=json.loads(row.metadata_) if row.metadata_ else {},
         agent_summary=row.agent_summary or "",
         agent_log=json.loads(row.agent_log) if row.agent_log else [],
@@ -78,6 +80,7 @@ def _envelope_to_row(env: Envelope, row: EnvelopeRow | None = None) -> EnvelopeR
     row.status = str(env.status)
     row.priority = env.priority
     row.labels = json.dumps(env.labels)
+    row.group = env.group
     row.metadata_ = json.dumps(env.metadata)
     row.agent_summary = env.agent_summary
     row.agent_log = json.dumps(env.agent_log)
@@ -109,6 +112,13 @@ class Store:
         )
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Migrate existing DBs that predate the group column
+            try:
+                await conn.execute(
+                    text("ALTER TABLE envelopes ADD COLUMN \"group\" TEXT DEFAULT ''")
+                )
+            except Exception:
+                pass  # Column already exists
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         logger.info("Store initialized at %s", self._db_path)
 
@@ -144,6 +154,7 @@ class Store:
         self,
         source: str | None = None,
         status: EnvelopeStatus | None = None,
+        group: str | None = None,
         limit: int = 50,
     ) -> list[Envelope]:
         """Query envelopes with optional filters, newest first."""
@@ -153,6 +164,8 @@ class Store:
                 stmt = stmt.where(EnvelopeRow.source == source)
             if status is not None:
                 stmt = stmt.where(EnvelopeRow.status == str(status))
+            if group is not None:
+                stmt = stmt.where(EnvelopeRow.group == group)
             stmt = stmt.limit(limit)
             result = await session.execute(stmt)
             rows = result.scalars().all()

@@ -44,6 +44,7 @@ class GitHubSourceConfig:
     state: str = "all"  # "open", "closed", "all"
     labels_filter: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=lambda: ["issues", "pull_requests"])
+    group: str = ""
 
 
 class GitHubAdaptor(BaseAdaptor):
@@ -204,6 +205,7 @@ class GitHubAdaptor(BaseAdaptor):
 
         for item in items:
             envelope = await self.normalize(item)
+            envelope.group = config.group
 
             # Dedup: skip if we've already processed this source_id
             if envelope.source_id in self._seen_ids:
@@ -374,3 +376,9 @@ class GitHubAdaptor(BaseAdaptor):
     def restore_cursors(self, cursors: dict[str, str]) -> None:
         """Restore cursors from previous run."""
         self._cursors.update(cursors)
+
+    def export_seen(self) -> list[str]:
+        return list(self._seen_ids)
+
+    def restore_seen(self, entries: list[str]) -> None:
+        self._seen_ids.update(e for e in entries if isinstance(e, str))

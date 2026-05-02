@@ -293,6 +293,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="GitHub personal access token (or set GITHUB_TOKEN env)",
     )
+    source_add.add_argument(
+        "--group",
+        type=str,
+        required=False,
+        default=None,
+        help="Attach this source to a named group (shared policy defaults)",
+    )
     source_add.set_defaults(func=cmd_source_add)
 
     # source list
@@ -636,6 +643,32 @@ def cmd_ui(args: argparse.Namespace) -> None:
 # ------------------------------------------------------------------
 
 
+def _source_dup_key(src: dict[str, Any]) -> tuple:
+    """Return an identity tuple used to detect duplicate sources."""
+    kind = src.get("kind")
+    if kind == "github":
+        return ("github", src.get("owner"), src.get("repo"))
+    if kind == "gmail":
+        return ("gmail", str(Path(src.get("client_secrets", "")).expanduser()))
+    if kind == "rss":
+        return ("rss", src.get("url"))
+    if kind == "arxiv":
+        return (
+            "arxiv",
+            src.get("query", ""),
+            tuple(sorted(src.get("categories", []))),
+            tuple(sorted(src.get("keywords", []))),
+        )
+    if kind == "anet":
+        return ("anet",)
+    return (kind,)
+
+
+def _source_exists(config: LoomConfig, new_src: dict[str, Any]) -> bool:
+    new_key = _source_dup_key(new_src)
+    return any(_source_dup_key(s) == new_key for s in config.sources)
+
+
 def cmd_source_add(args: argparse.Namespace) -> None:
     """Add a new source subscription."""
     config = load_config()
@@ -671,16 +704,20 @@ def _add_github_source(config: LoomConfig, args: argparse.Namespace) -> None:
         if repo.count("/") != 1:
             _die(f"Invalid repo format '{repo}' — expected 'owner/repo'")
         owner, name = repo.split("/")
-        config.sources.append(
-            {
-                "kind": "github",
-                "owner": owner,
-                "repo": name,
-                "poll_interval": args.interval,
-                "events": events,
-                "state": args.state,
-            }
-        )
+        entry: dict[str, Any] = {
+            "kind": "github",
+            "owner": owner,
+            "repo": name,
+            "poll_interval": args.interval,
+            "events": events,
+            "state": args.state,
+        }
+        if args.group:
+            entry["group"] = args.group
+        if _source_exists(config, entry):
+            print(f"  Skipped (already exists): {repo}")
+            continue
+        config.sources.append(entry)
         print(f"  Added: {repo} (events={events}, interval={args.interval}s, state={args.state})")
     tok = "provided" if args.token else "GITHUB_TOKEN env"
     print(f"\nGitHub source(s) saved to config. Token: {tok}")
@@ -688,12 +725,16 @@ def _add_github_source(config: LoomConfig, args: argparse.Namespace) -> None:
 
 
 def _add_gmail_source(config: LoomConfig, args: argparse.Namespace) -> None:
-    config.sources.append(
-        {
-            "kind": "gmail",
-            "client_secrets": args.credentials or "~/.loom/credentials/gmail-client-secrets.json",
-        }
-    )
+    entry: dict[str, Any] = {
+        "kind": "gmail",
+        "client_secrets": args.credentials or "~/.loom/credentials/gmail-client-secrets.json",
+    }
+    if args.group:
+        entry["group"] = args.group
+    if _source_exists(config, entry):
+        print(f"Source already exists, skipping: {_describe_source(entry)}")
+        return
+    config.sources.append(entry)
     print("Gmail source saved to config.")
     print("Run `loom daemon` to start monitoring.")
 
@@ -701,13 +742,17 @@ def _add_gmail_source(config: LoomConfig, args: argparse.Namespace) -> None:
 def _add_rss_source(config: LoomConfig, args: argparse.Namespace) -> None:
     if not args.url:
         _die("--url is required for RSS sources")
-    config.sources.append(
-        {
-            "kind": "rss",
-            "url": args.url,
-            "poll_interval": args.interval,
-        }
-    )
+    entry: dict[str, Any] = {
+        "kind": "rss",
+        "url": args.url,
+        "poll_interval": args.interval,
+    }
+    if args.group:
+        entry["group"] = args.group
+    if _source_exists(config, entry):
+        print(f"Source already exists, skipping: {_describe_source(entry)}")
+        return
+    config.sources.append(entry)
     print(f"RSS source saved: {args.url} (interval={args.interval}s)")
     print("Run `loom daemon` to start monitoring.")
 
@@ -731,6 +776,11 @@ def _add_arxiv_source(config: LoomConfig, args: argparse.Namespace) -> None:
         source["categories"] = [c.strip() for c in args.categories.split(",")]
     if args.keywords:
         source["keywords"] = [k.strip() for k in args.keywords.split(",")]
+    if args.group:
+        source["group"] = args.group
+    if _source_exists(config, source):
+        print(f"Source already exists, skipping: {_describe_source(source)}")
+        return
     config.sources.append(source)
     desc = args.query or f"cats={args.categories} kw={args.keywords}"
     print(f"arxiv source saved: {desc} (interval={args.interval}s, max={args.max_results})")

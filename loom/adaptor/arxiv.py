@@ -38,6 +38,7 @@ class ArxivSourceConfig:
     keywords: list[str] = field(default_factory=list)
     poll_interval: int = DEFAULT_POLL_INTERVAL
     max_results: int = DEFAULT_MAX_RESULTS
+    group: str = ""
 
     def build_query(self) -> str:
         """Return the effective query string."""
@@ -170,6 +171,7 @@ class ArxivAdaptor(BaseAdaptor):
 
         for result in results:
             envelope = await self.normalize(result)
+            envelope.group = config.group
 
             if envelope.source_id in self._seen_ids:
                 continue
@@ -229,3 +231,9 @@ class ArxivAdaptor(BaseAdaptor):
 
     async def execute_action(self, envelope: Envelope, action: dict) -> None:
         logger.debug("arxiv adaptor received action request (read-only, ignoring): %s", action)
+
+    def export_seen(self) -> list[str]:
+        return list(self._seen_ids)
+
+    def restore_seen(self, entries: list[str]) -> None:
+        self._seen_ids.update(e for e in entries if isinstance(e, str))
