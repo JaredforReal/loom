@@ -136,6 +136,78 @@ class TestSourcesEndpoint:
         assert body[0]["kind"] == "github"
         assert "unread" in body[0]
 
+    async def test_sources_default_mode_is_active(self, client: TestClient, webui_ctx) -> None:
+        webui_ctx.config.sources = [{"kind": "github", "owner": "a", "repo": "b"}]
+        body = client.get("/api/sources").json()
+        assert body[0]["mode"] == "active"
+
+    async def test_sources_surfaces_explicit_mode(self, client: TestClient, webui_ctx) -> None:
+        webui_ctx.config.sources = [
+            {"kind": "github", "owner": "a", "repo": "b", "mode": "fetch-only"}
+        ]
+        body = client.get("/api/sources").json()
+        assert body[0]["mode"] == "fetch-only"
+
+
+class TestSourceModeEndpoint:
+    async def test_patch_mode_writes_config(
+        self,
+        client: TestClient,
+        webui_ctx,
+        tmp_loom_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import loom.config as config_mod
+
+        monkeypatch.setattr(config_mod, "DEFAULT_LOOM_DIR", tmp_loom_dir)
+        webui_ctx.config.sources = [{"kind": "github", "owner": "a", "repo": "b"}]
+
+        r = client.patch("/api/sources/github/mode", json={"mode": "fetch-only"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body == {
+            "ok": True,
+            "kind": "github",
+            "mode": "fetch-only",
+            "updated": 1,
+        }
+
+        # In-memory config reflects the change
+        assert webui_ctx.config.sources[0]["mode"] == "fetch-only"
+        # Written to config.yaml
+        written = (tmp_loom_dir / "config.yaml").read_text()
+        assert "mode: fetch-only" in written
+
+    async def test_patch_mode_invalid_returns_400(self, client: TestClient, webui_ctx) -> None:
+        webui_ctx.config.sources = [{"kind": "github", "owner": "a", "repo": "b"}]
+        r = client.patch("/api/sources/github/mode", json={"mode": "nonsense"})
+        assert r.status_code == 400
+        assert "invalid" in r.json()["error"].lower()
+        # Config untouched
+        assert "mode" not in webui_ctx.config.sources[0]
+
+    async def test_patch_mode_unknown_kind_returns_404(self, client: TestClient, webui_ctx) -> None:
+        webui_ctx.config.sources = [{"kind": "github", "owner": "a", "repo": "b"}]
+        r = client.patch("/api/sources/nonexistent/mode", json={"mode": "paused"})
+        assert r.status_code == 404
+
+    async def test_patch_mode_all_valid_modes(
+        self,
+        client: TestClient,
+        webui_ctx,
+        tmp_loom_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import loom.config as config_mod
+
+        monkeypatch.setattr(config_mod, "DEFAULT_LOOM_DIR", tmp_loom_dir)
+        webui_ctx.config.sources = [{"kind": "github", "owner": "a", "repo": "b"}]
+
+        for mode in ("active", "fetch-only", "paused"):
+            r = client.patch("/api/sources/github/mode", json={"mode": mode})
+            assert r.status_code == 200, f"mode={mode} failed"
+            assert webui_ctx.config.sources[0]["mode"] == mode
+
 
 class TestContextUnset:
     """If daemon isn't running, WebUI endpoints should bubble a clean error."""
