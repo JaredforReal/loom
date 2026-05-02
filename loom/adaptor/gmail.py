@@ -68,9 +68,6 @@ class GmailMessage(TypedDict, total=False):
     payload: GmailPayload
 
 
-# --- module-level helpers -----------------------------------------------------
-
-
 def _extract_header(headers: list[GmailHeader], name: str) -> str:
     target = name.lower()
     for h in headers:
@@ -152,9 +149,6 @@ def _load_credentials(client_secrets: Path, token_path: Path) -> Any:
     return creds
 
 
-# --- adaptor ------------------------------------------------------------------
-
-
 class GmailAdaptor(BaseAdaptor):
     """Polls Gmail via the Google API and emits Envelopes through ``_emit``."""
 
@@ -182,7 +176,9 @@ class GmailAdaptor(BaseAdaptor):
         self._seen_index: set[str] = set()
         self._running = False
 
-    # ---- lifecycle -------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     async def start(self) -> None:
         """Authenticate, build the Gmail service, and schedule the poll loop."""
@@ -218,7 +214,9 @@ class GmailAdaptor(BaseAdaptor):
     def is_running(self) -> bool:
         return self._running
 
-    # ---- polling ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Polling
+    # ------------------------------------------------------------------
 
     async def _poll_once(self) -> None:
         if self._service is None:
@@ -260,7 +258,9 @@ class GmailAdaptor(BaseAdaptor):
         )
         return cast(GmailMessage, msg)
 
-    # ---- normalization ---------------------------------------------------
+    # ------------------------------------------------------------------
+    # Normalize
+    # ------------------------------------------------------------------
 
     async def normalize(self, raw_event: Any) -> Envelope:
         """Convert a Gmail message dict into an ``Envelope``."""
@@ -312,7 +312,9 @@ class GmailAdaptor(BaseAdaptor):
             },
         )
 
-    # ---- actions ---------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Execute actions
+    # ------------------------------------------------------------------
 
     async def execute_action(self, envelope: Envelope, action: dict[str, Any]) -> None:
         """Execute a user-approved action. Raises if the adaptor isn't started."""
@@ -371,7 +373,9 @@ class GmailAdaptor(BaseAdaptor):
             userId=self._user_id, id=envelope.source_id
         ).execute()
 
-    # ---- seen-set -------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Seen-set (caller owns persistence)
+    # ------------------------------------------------------------------
 
     def _record_seen(self, message_id: str) -> None:
         if message_id in self._seen_index:
