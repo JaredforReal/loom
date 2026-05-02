@@ -332,7 +332,8 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         bus, session_mgr, policy_engine, mailbox, agent_enabled=True, config=config
     )
 
-    # Wire session completion callback
+    # Wire session lifecycle callbacks
+    session_mgr._on_start = dispatcher.handle_session_start
     session_mgr._on_complete = dispatcher.handle_session_complete
 
     # --- Adaptors ---

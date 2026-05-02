@@ -84,6 +84,7 @@ class SessionManager:
         max_concurrent: int = 3,
         prompt_dir: Path | None = None,
         bundled_prompt_dir: Path | None = None,
+        on_start: Callable[[Session], Awaitable[None]] | None = None,
         on_complete: Callable[[Session], Awaitable[None]] | None = None,
     ) -> None:
         self._sessions: dict[str, Session] = {}
@@ -91,6 +92,7 @@ class SessionManager:
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._prompt_dir = prompt_dir or Path.home() / ".loom" / "prompts"
         self._bundled_prompt_dir = bundled_prompt_dir
+        self._on_start = on_start
         self._on_complete = on_complete
         self._templates: dict[str, str] = {}
         self._load_prompt_templates()
@@ -205,6 +207,11 @@ class SessionManager:
             async with self._semaphore:
                 session.status = SessionStatus.RUNNING
                 session.started_at = datetime.utcnow()
+                if self._on_start:
+                    try:
+                        await self._on_start(session)
+                    except Exception:
+                        logger.exception("on_start callback failed for session %s", session.id)
                 client = ClaudeSDKClient(options=options)
                 session._client = client
                 try:
