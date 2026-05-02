@@ -36,6 +36,19 @@ class Mailbox:
         await self._bus.publish("envelope_status_changed", envelope)
         return envelope
 
+    async def save_and_transition(self, envelope: Envelope, status: EnvelopeStatus) -> Envelope:
+        """Save the envelope (with any mutations) and transition to a new status.
+
+        Unlike ``update_status``, this persists the envelope object as-is,
+        including any fields the caller has already mutated (e.g.
+        ``agent_summary``, ``agent_log``, ``proposed_action``), then sets
+        the new status.
+        """
+        envelope.status = status
+        await self._store.save_envelope(envelope)
+        await self._bus.publish("envelope_status_changed", envelope)
+        return envelope
+
     async def list_envelopes(
         self,
         source: str | None = None,
