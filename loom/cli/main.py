@@ -257,14 +257,34 @@ def cmd_daemon(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     """Show queue backlog and envelope status counts."""
+    config = load_config()
+    pid_path = config.paths.data_dir / "loom.pid"
+    online = False
+    daemon_info = {"online": False, "active_sessions": 0, "queue_backlog": 0}
+
+    if pid_path.exists():
+        try:
+            pid = int(pid_path.read_text().strip())
+            os.kill(pid, 0)
+            online = True
+            daemon_info["online"] = True
+        except (ProcessLookupError, ValueError):
+            pass
+
     counts = asyncio.run(_load_status_counts())
     backlog = counts.get(str(EnvelopeStatus.PENDING), 0) + counts.get(
         str(EnvelopeStatus.PROCESSING), 0
     )
+    daemon_info["queue_backlog"] = backlog
+
     console = make_console()
-    console.print(status_bar({"online": False, "active_sessions": 0, "queue_backlog": backlog}))
+    console.print(status_bar(daemon_info))
     for status, n in sorted(counts.items()):
         console.print(f"  {status:<20} {n}", style="loom.muted")
+    if online:
+        console.print(f"  daemon pid={pid}", style="loom.muted")
+    else:
+        console.print("  daemon: not running", style="loom.muted")
 
 
 def cmd_ui(args: argparse.Namespace) -> None:

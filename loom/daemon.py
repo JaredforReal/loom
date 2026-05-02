@@ -264,3 +264,11 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
 
     await store.close()
     logger.info("Loom daemon shut down")
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    from loom.config import load_config
+
+    asyncio.run(run_daemon(load_config()))
