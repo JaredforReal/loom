@@ -1,8 +1,8 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { ExternalLink, Bot, Check, X } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ExternalLink, Bot, Check, X, Copy } from "lucide-react"
 import { toast } from "sonner"
 
-import { approveEnvelope, dismissEnvelope, openInTerminal } from "@/lib/api"
+import { approveEnvelope, dismissEnvelope, getEnvelopeSession, openInTerminal } from "@/lib/api"
 import type { Envelope } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -41,6 +41,12 @@ function extractSourceUrl(envelope: Envelope): string | null {
 
 export function ActionsPanel({ envelope }: ActionsPanelProps) {
   const qc = useQueryClient()
+
+  const { data: sessionInfo } = useQuery({
+    queryKey: ["session", envelope?.id],
+    queryFn: () => getEnvelopeSession(envelope!.id),
+    enabled: !!envelope,
+  })
 
   const approveMut = useMutation({
     mutationFn: (id: string) => approveEnvelope(id),
@@ -103,6 +109,20 @@ export function ActionsPanel({ envelope }: ActionsPanelProps) {
           >
             <Bot className="h-3.5 w-3.5" />
           </IconButton>
+          {sessionInfo && (
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(`claude -r ${sessionInfo.cli_session_id}`)
+                toast.success("Copied resume command")
+              }}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title={`Session: ${sessionInfo.cli_session_id}${sessionInfo.cwd ? `\ncwd: ${sessionInfo.cwd}` : ""}`}
+            >
+              <Copy className="h-2.5 w-2.5" />
+              {sessionInfo.cli_session_id.slice(0, 8)}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-0.5">
           <IconButton

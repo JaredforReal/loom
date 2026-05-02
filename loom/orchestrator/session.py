@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -61,6 +62,7 @@ class Session:
     steps: list[AgentStep] = field(default_factory=list)
     total_cost_usd: float = 0.0
     cli_session_id: str = ""
+    cwd: str = ""
     _client: ClaudeSDKClient | None = field(default=None, repr=False)
 
 
@@ -194,6 +196,7 @@ class SessionManager:
             system_prompt=effective_system_prompt,
             status=SessionStatus.RUNNING,
             started_at=datetime.utcnow(),
+            cwd=cwd or os.getcwd(),
         )
         self._sessions[session.id] = session
 

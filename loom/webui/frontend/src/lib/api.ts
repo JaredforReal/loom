@@ -35,4 +35,9 @@ export const openInTerminal = (id: string, confirm?: boolean) => {
   )
 }
 
+export const getEnvelopeSession = (id: string) =>
+  jsonFetch<{ cli_session_id: string; cwd: string | null } | null>(
+    `/api/envelopes/${id}/session`,
+  )
+
 export const listSources = () => jsonFetch<Source[]>("/api/sources")

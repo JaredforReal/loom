@@ -111,9 +111,11 @@ async def open_in_terminal(envelope_id: str, request: Request):
     ctx = _ctx()
 
     cli_session_id = None
+    session_cwd = None
     for s in ctx.session_mgr._sessions.values():
         if s.envelope_id == envelope_id and s.cli_session_id:
             cli_session_id = s.cli_session_id
+            session_cwd = s.cwd or None
             break
 
     if not cli_session_id:
@@ -129,6 +131,8 @@ async def open_in_terminal(envelope_id: str, request: Request):
 
     with open(script_path, "w") as f:
         f.write("#!/bin/bash\n")
+        if session_cwd:
+            f.write(f"cd {shlex.quote(session_cwd)}\n")
         if cli_session_id:
             f.write(f"claude --resume {shlex.quote(cli_session_id)}\n")
         else:
@@ -162,6 +166,24 @@ async def open_in_terminal(envelope_id: str, request: Request):
         return {"error": "failed to open terminal"}
 
     return {"status": "ok", "resumed": bool(cli_session_id)}
+
+
+@app.get("/api/envelopes/{envelope_id}/session")
+async def get_envelope_session(envelope_id: str):
+    """Return the CLI session ID and cwd for the envelope's agent session, if any."""
+    ctx = _ctx()
+    # Check in-memory sessions first (running or recently completed)
+    for s in ctx.session_mgr._sessions.values():
+        if s.envelope_id == envelope_id and s.cli_session_id:
+            return {"cli_session_id": s.cli_session_id, "cwd": s.cwd or None}
+    # Fallback: persisted in envelope metadata (survives daemon restart)
+    envelope = await ctx.store.get_envelope(envelope_id)
+    if envelope is not None:
+        md = envelope.metadata or {}
+        sid = md.get("cli_session_id")
+        if sid:
+            return {"cli_session_id": sid, "cwd": md.get("session_cwd")}
+    return None
 
 
 # --- Sources ---
