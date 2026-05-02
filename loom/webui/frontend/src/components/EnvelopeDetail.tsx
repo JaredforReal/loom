@@ -10,6 +10,46 @@ import { cn, formatRelativeTime } from "@/lib/utils"
 import { Separator } from "@/components/ui/separator"
 import { Label } from "./Label"
 
+function CollapsibleSection({
+  title,
+  defaultOpen = true,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 text-left"
+      >
+        <ChevronRight
+          className={cn(
+            "h-3 w-3 shrink-0 transition-transform duration-200",
+            open && "rotate-90"
+          )}
+        />
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {title}
+        </h2>
+      </button>
+      <Separator />
+      <div
+        className={cn(
+          "grid transition-all duration-200",
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+        )}
+      >
+        <div className="overflow-hidden">{children}</div>
+      </div>
+    </section>
+  )
+}
+
 interface EnvelopeDetailProps {
   envelopeId: string | null
 }
@@ -59,7 +99,6 @@ export function EnvelopeDetail({ envelopeId }: EnvelopeDetailProps) {
   const assignees = Array.isArray(md.assignees) ? (md.assignees as string[]) : []
   const user = typeof md.user === "string" ? md.user : null
   const repo = typeof md.repo === "string" ? md.repo : null
-  const kind = typeof md.kind === "string" ? md.kind : envelope.source
 
   return (
     <div className="space-y-5 px-6 pb-6 pt-5">
@@ -81,28 +120,38 @@ export function EnvelopeDetail({ envelopeId }: EnvelopeDetailProps) {
         )}
       </header>
 
-      <section className="rounded-md border border-border bg-muted/20 px-3 py-2">
-        <PropertyRow label="Status" value={envelope.status} />
-        {user && <PropertyRow label="Author" value={user} />}
-        {repo && <PropertyRow label="Repo" value={repo} />}
-        <PropertyRow label="Kind" value={kind} />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="uppercase">{envelope.status}</span>
+        {user && (
+          <>
+            <span className="text-border">·</span>
+            <span>{user}</span>
+          </>
+        )}
+        {repo && (
+          <>
+            <span className="text-border">·</span>
+            <span>{repo}</span>
+          </>
+        )}
         {envelope.received_at && (
-          <PropertyRow
-            label="Received"
-            value={formatRelativeTime(envelope.received_at)}
-          />
+          <>
+            <span className="text-border">·</span>
+            <span>{formatRelativeTime(envelope.received_at)}</span>
+          </>
         )}
         {assignees.length > 0 && (
-          <PropertyRow label="Assignees" value={assignees.join(", ")} />
+          <>
+            <span className="text-border">·</span>
+            <span>{assignees.join(", ")}</span>
+          </>
         )}
-      </section>
+      </div>
 
       {envelope.agent_summary && (
-        <Section title="Agent summary">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
-            {envelope.agent_summary}
-          </p>
-        </Section>
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+          <Markdown source={envelope.agent_summary} />
+        </div>
       )}
 
       {envelope.proposed_action && (
@@ -114,9 +163,9 @@ export function EnvelopeDetail({ envelopeId }: EnvelopeDetailProps) {
       )}
 
       {envelope.body && (
-        <Section title="Body">
+        <CollapsibleSection title="Body">
           <Markdown source={envelope.body} />
-        </Section>
+        </CollapsibleSection>
       )}
 
       {envelope.agent_log.length > 0 && (
@@ -124,17 +173,6 @@ export function EnvelopeDetail({ envelopeId }: EnvelopeDetailProps) {
           <AgentLogList entries={envelope.agent_log} />
         </Section>
       )}
-    </div>
-  )
-}
-
-function PropertyRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex min-h-8 items-center gap-3 rounded-md px-1 py-1 text-sm transition-colors hover:bg-accent/50">
-      <span className="w-20 shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
-      <span className="truncate text-foreground">{value}</span>
     </div>
   )
 }

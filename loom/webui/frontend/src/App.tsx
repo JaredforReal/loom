@@ -6,7 +6,6 @@ import { listEnvelopes } from "@/lib/api"
 import { getDefaultSource } from "@/lib/settings"
 import { Sidebar } from "@/components/Sidebar"
 import { KanbanBoard } from "@/components/KanbanBoard"
-import { EnvelopeDrawer } from "@/components/EnvelopeDrawer"
 import { StatusBar } from "@/components/StatusBar"
 import { SettingsPage } from "@/pages/SettingsPage"
 
@@ -48,6 +47,7 @@ export default function App() {
               showArchived={showArchived}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              onCloseDetail={() => setSelectedId(null)}
             />
           ) : (
             <SettingsPage view={view} />
@@ -55,12 +55,6 @@ export default function App() {
         </main>
         <StatusBar />
       </div>
-      {view === "inbox" && (
-        <EnvelopeDrawer
-          envelopeId={selectedId}
-          onClose={() => setSelectedId(null)}
-        />
-      )}
       <Toaster position="bottom-right" richColors />
     </div>
   )
