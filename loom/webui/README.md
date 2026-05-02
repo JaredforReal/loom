@@ -52,7 +52,7 @@ npm run dev
 构建前端静态文件，由 daemon 直接提供 WebUI 服务：
 
 ```bash
-cd loom/webui/src
+cd loom/webui/frontend
 npm run build    # 输出到 webui/dist/
 
 # 启动 daemon，会自动检测 dist/ 并挂载静态文件
