@@ -82,8 +82,6 @@ def _resolve_proxy(config: LoomConfig) -> str | None:
 # DaemonContext — shared runtime state
 # ---------------------------------------------------------------------------
 
-_ctx: DaemonContext | None = None
-
 
 @dataclass
 class DaemonContext:
@@ -124,14 +122,18 @@ class DaemonContext:
 
 
 def get_context() -> DaemonContext:
-    if _ctx is None:
+    from loom.api_server import app
+
+    ctx = getattr(app.state, "ctx", None)
+    if ctx is None:
         raise RuntimeError("Daemon not running")
-    return _ctx
+    return ctx
 
 
 def set_context(ctx: DaemonContext) -> None:
-    global _ctx
-    _ctx = ctx
+    from loom.api_server import app
+
+    app.state.ctx = ctx
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +298,10 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
         dispatcher=dispatcher,
         adaptors=adaptors,
     )
+
+    # --- Set context (stored on FastAPI app.state) ---
+    from loom.api_server import app
+
     set_context(ctx)
 
     # --- Start components ---
@@ -318,8 +324,6 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     ctx.adaptors = started_adaptors
 
     # --- Uvicorn (API server) ---
-    from loom.webui.app import app
-
     uv_config = uvicorn.Config(
         app,
         host=config.daemon.host,
