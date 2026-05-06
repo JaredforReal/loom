@@ -301,6 +301,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Max papers per poll for arxiv (default 50)",
     )
     source_add.add_argument(
+        "--title-filter",
+        type=str,
+        required=False,
+        default=None,
+        help="RSS: only include entries whose title matches any keyword (comma-separated)",
+    )
+    source_add.add_argument(
         "--token",
         type=str,
         required=False,
@@ -672,7 +679,11 @@ def _source_dup_key(src: dict[str, Any]) -> tuple:
     if kind == "gmail":
         return ("gmail", str(Path(src.get("client_secrets", "")).expanduser()))
     if kind == "rss":
-        return ("rss", src.get("url"))
+        return (
+            "rss",
+            src.get("url"),
+            tuple(sorted(src.get("title_filter", []))),
+        )
     if kind == "arxiv":
         return (
             "arxiv",
@@ -787,13 +798,19 @@ def _add_rss_source(config: LoomConfig, args: argparse.Namespace) -> None:
         "url": args.url,
         "poll_interval": args.interval,
     }
+    if args.title_filter:
+        entry["title_filter"] = [t.strip() for t in args.title_filter.split(",") if t.strip()]
     if args.group:
         entry["group"] = args.group
     if _source_exists(config, entry):
         print(f"Source already exists, skipping: {_describe_source(entry)}")
         return
     config.sources.append(entry)
-    print(f"RSS source saved: {args.url} (interval={args.interval}s)")
+    filters = []
+    if entry.get("title_filter"):
+        filters.append(f"title_filter={entry['title_filter']}")
+    filter_str = f", filters=[{', '.join(filters)}]" if filters else ""
+    print(f"RSS source saved: {args.url} (interval={args.interval}s{filter_str})")
     print("Run `loom daemon` to start monitoring.")
 
 

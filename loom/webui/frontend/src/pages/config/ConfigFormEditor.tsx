@@ -45,6 +45,7 @@ interface SourceFieldDef {
   options?: string[]
   default?: string | number
   placeholder?: string
+  section?: "config" | "filter"
 }
 
 const SOURCE_FIELDS: Record<string, SourceFieldDef[]> = {
@@ -53,17 +54,22 @@ const SOURCE_FIELDS: Record<string, SourceFieldDef[]> = {
     { key: "repo", label: "Repo", type: "text", placeholder: "hello-world" },
     { key: "poll_interval", label: "Poll interval (s)", type: "number", default: 120 },
     { key: "state", label: "State", type: "select", options: ["all", "open", "closed"], default: "all" },
+    { key: "events", label: "Events", type: "tags", placeholder: "issues, pull_requests", section: "filter" },
+    { key: "include_labels", label: "Labels (any match)", type: "tags", placeholder: "bug, enhancement", section: "filter" },
+    { key: "keywords", label: "Keywords (title/body)", type: "tags", placeholder: "CUDA, quantization", section: "filter" },
+    { key: "authors", label: "Authors", type: "tags", placeholder: "username", section: "filter" },
   ],
   rss: [
     { key: "url", label: "Feed URL", type: "text", placeholder: "https://example.com/feed.xml" },
     { key: "poll_interval", label: "Poll interval (s)", type: "number", default: 300 },
+    { key: "title_filter", label: "Title filter (any match)", type: "tags", placeholder: "keyword1, keyword2", section: "filter" },
   ],
   arxiv: [
     { key: "categories", label: "Categories", type: "tags", placeholder: "cs.AI, cs.CL" },
-    { key: "keywords", label: "Keywords", type: "tags", placeholder: "LLM, reasoning" },
     { key: "query", label: "Query (override)", type: "text", placeholder: "cat:cs.AI AND ti:agent" },
     { key: "poll_interval", label: "Poll interval (s)", type: "number", default: 43200 },
     { key: "max_results", label: "Max results", type: "number", default: 50 },
+    { key: "keywords", label: "Keywords", type: "tags", placeholder: "LLM, reasoning", section: "filter" },
   ],
   gmail: [
     { key: "query", label: "Gmail query", type: "text", default: "is:unread -in:chats newer_than:1d" },
@@ -406,10 +412,7 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
                     const sources = config.sources.filter((_, j) => j !== i)
                     update({ ...config, sources })
                   }}
-                  defaultExpanded={
-                    i === config.sources.length - 1 &&
-                    Object.keys(s).filter((k) => !SOURCE_COMMON_FIELDS.has(k) && s[k] !== undefined && s[k] !== "").length === 0
-                  }
+                  defaultExpanded={true}
                 />
               ))}
             </div>
@@ -437,6 +440,8 @@ function SourceCard({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const schemaFields = SOURCE_FIELDS[source.kind] ?? []
+  const configFields = schemaFields.filter((f) => f.section !== "filter")
+  const filterFields = schemaFields.filter((f) => f.section === "filter")
   const schemaKeys = new Set(schemaFields.map((f) => f.key))
   const extraEntries = Object.entries(source).filter(
     ([k]) => !SOURCE_COMMON_FIELDS.has(k) && !schemaKeys.has(k),
@@ -545,8 +550,8 @@ function SourceCard({
               </select>
             </Field>
 
-            {/* Schema-driven fields for the current source kind */}
-            {schemaFields.map((f) => (
+            {/* Config fields */}
+            {configFields.map((f) => (
               <SourceField key={f.key} def={f} value={source[f.key]} onChange={(v) => setField(f.key, v)} />
             ))}
 
@@ -564,6 +569,20 @@ function SourceCard({
               </Field>
             ))}
           </div>
+
+          {/* Filter section — only shown when the source kind has filter fields */}
+          {filterFields.length > 0 && (
+            <>
+              <div className="mt-3 mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Filters
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {filterFields.map((f) => (
+                  <SourceField key={f.key} def={f} value={source[f.key]} onChange={(v) => setField(f.key, v)} />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
