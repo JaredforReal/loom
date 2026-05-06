@@ -24,6 +24,7 @@ export interface Envelope {
   status: EnvelopeStatus
   priority: number
   labels: string[]
+  group: string
   metadata: Record<string, unknown>
   agent_summary: string
   agent_log: AgentLogEntry[]

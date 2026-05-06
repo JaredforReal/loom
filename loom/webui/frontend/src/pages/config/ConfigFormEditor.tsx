@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import yaml from "js-yaml"
 import { ChevronRight, Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { savePolicy } from "@/lib/api"
+import { listPolicies } from "@/lib/policies"
 import { cn } from "@/lib/utils"
 
 interface ConfigFormEditorProps {
@@ -139,6 +141,15 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
     "error" in parsed ? emptyConfig() : parsed,
   )
   const lastEmittedRef = useRef<string>(value)
+
+  const { data: policies = [] } = useQuery({
+    queryKey: ["policies"],
+    queryFn: listPolicies,
+  })
+  const policyNames = useMemo(
+    () => policies.map((p) => p.name.replace(/\.ya?ml$/, "")),
+    [policies],
+  )
 
   useEffect(() => {
     if (value === lastEmittedRef.current) return
@@ -305,6 +316,7 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
                 key={name}
                 name={name}
                 policy={config.groups[name]}
+                policyNames={policyNames}
                 onChange={(next) =>
                   update({
                     ...config,
@@ -384,6 +396,7 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
                   key={i}
                   source={s}
                   groupNames={groupNames}
+                  groups={config.groups}
                   onChange={(next) => {
                     const sources = [...config.sources]
                     sources[i] = next
@@ -410,12 +423,14 @@ export function ConfigFormEditor({ value, onChange }: ConfigFormEditorProps) {
 function SourceCard({
   source,
   groupNames,
+  groups,
   onChange,
   onRemove,
   defaultExpanded = false,
 }: {
   source: Record<string, unknown> & { kind: string }
   groupNames: string[]
+  groups: Record<string, string>
   onChange: (next: Record<string, unknown> & { kind: string }) => void
   onRemove: () => void
   defaultExpanded?: boolean
@@ -459,7 +474,12 @@ function SourceCard({
         </button>
         <span className="font-mono text-xs font-medium">{source.kind}</span>
         {source.group ? (
-          <span className="text-xs text-muted-foreground">group: {String(source.group)}</span>
+          <span className="text-xs text-muted-foreground">
+            group: {String(source.group)}
+            {groups[String(source.group)] && (
+              <span className="ml-1 opacity-60">→ {groups[String(source.group)]}</span>
+            )}
+          </span>
         ) : (
           <span className="text-xs text-muted-foreground">(ungrouped)</span>
         )}
@@ -632,16 +652,30 @@ function SourceField({
 function GroupCard({
   name,
   policy,
+  policyNames,
   onChange,
   onRename,
   onRemove,
 }: {
   name: string
   policy: string
+  policyNames: string[]
   onChange: (next: string) => void
   onRename: (next: string) => void
   onRemove: () => void
 }) {
+  const handlePolicyChange = (value: string) => {
+    if (value === "__new__") {
+      const newName = window.prompt("New policy name (without .yaml):")
+      if (!newName) return
+      const template = `prompt: \nmodel: sonnet\nauto_approve: false\n`
+      savePolicy(`${newName}.yaml`, template).catch(() => {})
+      onChange(newName)
+    } else {
+      onChange(value)
+    }
+  }
+
   return (
     <div className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-center gap-2">
@@ -654,13 +688,19 @@ function GroupCard({
           />
         </Field>
         <Field label="Policy" className="flex-1">
-          <input
-            type="text"
+          <select
             value={policy}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="arxiv_policy"
+            onChange={(e) => handlePolicyChange(e.target.value)}
             className={inputCls}
-          />
+          >
+            <option value="">(none)</option>
+            {policyNames.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+            <option value="__new__">+ Create new policy...</option>
+          </select>
         </Field>
         <Button
           size="icon"
