@@ -16,7 +16,7 @@ interface KanbanBoardProps {
   envelopes: Envelope[]
   showArchived: boolean
   selectedId: string | null
-  onSelect: (id: string) => void
+  onSelect: (id: string | null) => void
   onCloseDetail: () => void
 }
 
