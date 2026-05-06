@@ -245,6 +245,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Issue/PR state filter (open, closed, all)",
     )
     source_add.add_argument(
+        "--include-labels",
+        type=str,
+        required=False,
+        default=None,
+        help="GitHub: only include issues/PRs with these labels (comma-separated, OR match)",
+    )
+    source_add.add_argument(
+        "--authors",
+        type=str,
+        required=False,
+        default=None,
+        help="GitHub: only include issues/PRs by these users (comma-separated)",
+    )
+    source_add.add_argument(
         "--url",
         type=str,
         required=False,
@@ -285,6 +299,13 @@ def _build_parser() -> argparse.ArgumentParser:
         required=False,
         default=50,
         help="Max papers per poll for arxiv (default 50)",
+    )
+    source_add.add_argument(
+        "--title-filter",
+        type=str,
+        required=False,
+        default=None,
+        help="RSS: only include entries whose title matches any keyword (comma-separated)",
     )
     source_add.add_argument(
         "--token",
@@ -647,11 +668,22 @@ def _source_dup_key(src: dict[str, Any]) -> tuple:
     """Return an identity tuple used to detect duplicate sources."""
     kind = src.get("kind")
     if kind == "github":
-        return ("github", src.get("owner"), src.get("repo"))
+        return (
+            "github",
+            src.get("owner"),
+            src.get("repo"),
+            tuple(sorted(src.get("include_labels", []))),
+            tuple(sorted(src.get("keywords", []))),
+            tuple(sorted(src.get("authors", []))),
+        )
     if kind == "gmail":
         return ("gmail", str(Path(src.get("client_secrets", "")).expanduser()))
     if kind == "rss":
-        return ("rss", src.get("url"))
+        return (
+            "rss",
+            src.get("url"),
+            tuple(sorted(src.get("title_filter", []))),
+        )
     if kind == "arxiv":
         return (
             "arxiv",
@@ -712,13 +744,32 @@ def _add_github_source(config: LoomConfig, args: argparse.Namespace) -> None:
             "events": events,
             "state": args.state,
         }
+        if args.include_labels:
+            entry["include_labels"] = [
+                label.strip() for label in args.include_labels.split(",") if label.strip()
+            ]
+        if args.keywords:
+            entry["keywords"] = [k.strip() for k in args.keywords.split(",") if k.strip()]
+        if args.authors:
+            entry["authors"] = [a.strip() for a in args.authors.split(",") if a.strip()]
         if args.group:
             entry["group"] = args.group
         if _source_exists(config, entry):
             print(f"  Skipped (already exists): {repo}")
             continue
         config.sources.append(entry)
-        print(f"  Added: {repo} (events={events}, interval={args.interval}s, state={args.state})")
+        filters = []
+        if entry.get("include_labels"):
+            filters.append(f"labels={entry['include_labels']}")
+        if entry.get("keywords"):
+            filters.append(f"keywords={entry['keywords']}")
+        if entry.get("authors"):
+            filters.append(f"authors={entry['authors']}")
+        filter_str = f", filters=[{', '.join(filters)}]" if filters else ""
+        print(
+            f"Added: {repo}",
+            f"(events={events}, interval={args.interval}s, state={args.state}{filter_str})",
+        )
     tok = "provided" if args.token else "GITHUB_TOKEN env"
     print(f"\nGitHub source(s) saved to config. Token: {tok}")
     print("Run `loom daemon` to start monitoring.")
@@ -747,13 +798,19 @@ def _add_rss_source(config: LoomConfig, args: argparse.Namespace) -> None:
         "url": args.url,
         "poll_interval": args.interval,
     }
+    if args.title_filter:
+        entry["title_filter"] = [t.strip() for t in args.title_filter.split(",") if t.strip()]
     if args.group:
         entry["group"] = args.group
     if _source_exists(config, entry):
         print(f"Source already exists, skipping: {_describe_source(entry)}")
         return
     config.sources.append(entry)
-    print(f"RSS source saved: {args.url} (interval={args.interval}s)")
+    filters = []
+    if entry.get("title_filter"):
+        filters.append(f"title_filter={entry['title_filter']}")
+    filter_str = f", filters=[{', '.join(filters)}]" if filters else ""
+    print(f"RSS source saved: {args.url} (interval={args.interval}s{filter_str})")
     print("Run `loom daemon` to start monitoring.")
 
 
@@ -790,7 +847,14 @@ def _add_arxiv_source(config: LoomConfig, args: argparse.Namespace) -> None:
 def _describe_source(src: dict[str, object]) -> str:
     kind = src.get("kind")
     if kind == "github":
-        return f"{src.get('owner', '?')}/{src.get('repo', '?')}"
+        parts = [f"{src.get('owner', '?')}/{src.get('repo', '?')}"]
+        if src.get("include_labels"):
+            parts.append(f"labels={','.join(src['include_labels'])}")  # type: ignore[arg-type]
+        if src.get("keywords"):
+            parts.append(f"kw={','.join(src['keywords'])}")  # type: ignore[arg-type]
+        if src.get("authors"):
+            parts.append(f"by={','.join(src['authors'])}")  # type: ignore[arg-type]
+        return " ".join(parts)
     if kind == "gmail":
         return f"Gmail ({src.get('query', 'is:unread')})"
     if kind == "rss":
