@@ -746,7 +746,7 @@ def _add_github_source(config: LoomConfig, args: argparse.Namespace) -> None:
         }
         if args.include_labels:
             entry["include_labels"] = [
-                lable.strip() for lable in args.include_labels.split(",") if lable.strip()
+                label.strip() for label in args.include_labels.split(",") if label.strip()
             ]
         if args.keywords:
             entry["keywords"] = [k.strip() for k in args.keywords.split(",") if k.strip()]
