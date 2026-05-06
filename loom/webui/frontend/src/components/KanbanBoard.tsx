@@ -35,6 +35,7 @@ export function KanbanBoard({
       done: [],
       dismissed: [],
       failed: [],
+      tracked: [],
     }
     for (const e of envelopes) g[e.status].push(e)
     return g

@@ -54,7 +54,7 @@ const SOURCE_FIELDS: Record<string, SourceFieldDef[]> = {
     { key: "repo", label: "Repo", type: "text", placeholder: "hello-world" },
     { key: "poll_interval", label: "Poll interval (s)", type: "number", default: 120 },
     { key: "state", label: "State", type: "select", options: ["all", "open", "closed"], default: "all", section: "filter" },
-    { key: "events", label: "Events", type: "tags", placeholder: "issues, pull_requests", section: "filter" },
+    { key: "events", label: "Events", type: "tags", placeholder: "issues, pull_requests, releases", section: "filter" },
     { key: "include_labels", label: "Labels (any match)", type: "tags", placeholder: "bug, enhancement", section: "filter" },
     { key: "keywords", label: "Keywords (title/body)", type: "tags", placeholder: "CUDA, quantization", section: "filter" },
     { key: "authors", label: "Authors", type: "tags", placeholder: "username", section: "filter" },

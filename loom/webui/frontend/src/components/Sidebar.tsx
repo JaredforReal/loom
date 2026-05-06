@@ -8,6 +8,7 @@ import {
   Folder,
   FolderOpen,
   Inbox,
+  Eye,
   Settings as SettingsIcon,
   SlidersHorizontal,
 } from "lucide-react"
@@ -180,6 +181,12 @@ export function Sidebar({
         </Section>
 
         <Section title="View">
+          <SidebarRow
+            icon={<Eye className="h-4 w-4" />}
+            label="Tracked"
+            active={view === "tracked"}
+            onClick={() => onViewChange("tracked")}
+          />
           <SidebarRow
             icon={<Archive className="h-4 w-4" />}
             label={showArchived ? "Hide archived" : "Show archived"}

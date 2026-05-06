@@ -42,6 +42,11 @@ const STATUS_TOKEN: Record<EnvelopeStatus, { bg: string; dot: string; label: str
     dot: "bg-destructive",
     label: "text-destructive",
   },
+  tracked: {
+    bg: "bg-violet-500/5",
+    dot: "bg-violet-500",
+    label: "text-violet-600",
+  },
 }
 
 export function Column({ title, status, envelopes, selectedId, onSelect }: ColumnProps) {

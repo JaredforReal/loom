@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ExternalLink, Bot, Check, X, Copy } from "lucide-react"
+import { ExternalLink, Bot, Check, X, Copy, Eye } from "lucide-react"
 import { toast } from "sonner"
 
-import { approveEnvelope, dismissEnvelope, getEnvelopeSession, openInTerminal } from "@/lib/api"
+import { approveEnvelope, dismissEnvelope, getEnvelopeSession, openInTerminal, trackEnvelope } from "@/lib/api"
 import type { Envelope } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -68,6 +68,17 @@ export function ActionsPanel({ envelope }: ActionsPanelProps) {
     onError: (e) => toast.error(String(e)),
   })
 
+  const trackMut = useMutation({
+    mutationFn: (id: string) => trackEnvelope(id),
+    onSuccess: (_, id) => {
+      toast.success("Tracking — updates will appear in Tracked view")
+      qc.invalidateQueries({ queryKey: ["envelopes"] })
+      qc.invalidateQueries({ queryKey: ["envelope", id] })
+      qc.invalidateQueries({ queryKey: ["events"] })
+    },
+    onError: (e) => toast.error(String(e)),
+  })
+
   if (!envelope) return null
 
   const sourceUrl = extractSourceUrl(envelope)
@@ -75,7 +86,13 @@ export function ActionsPanel({ envelope }: ActionsPanelProps) {
   const isTerminal =
     envelope.status === "done" ||
     envelope.status === "dismissed" ||
-    envelope.status === "failed"
+    envelope.status === "failed" ||
+    envelope.status === "tracked"
+  const canTrack =
+    envelope.source === "github" &&
+    envelope.status !== "tracked" &&
+    envelope.status !== "done" &&
+    envelope.status !== "dismissed"
 
   const openInAgent = async () => {
     try {
@@ -125,6 +142,16 @@ export function ActionsPanel({ envelope }: ActionsPanelProps) {
           )}
         </div>
         <div className="flex items-center gap-0.5">
+          {canTrack && (
+            <IconButton
+              label="Track"
+              disabled={trackMut.isPending}
+              onClick={() => trackMut.mutate(envelope.id)}
+              className="text-blue-600 hover:text-blue-700"
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </IconButton>
+          )}
           <IconButton
             label="Approve"
             disabled={!canApprove || approveMut.isPending}

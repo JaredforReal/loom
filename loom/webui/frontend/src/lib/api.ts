@@ -1,4 +1,4 @@
-import type { DaemonStatus, Envelope, GroupSummary, Source } from "./types"
+import type { DaemonStatus, Envelope, GroupSummary, Source, TrackedEvent } from "./types"
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
@@ -53,4 +53,35 @@ export const savePolicy = (name: string, content: string) =>
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
+  })
+
+// --- Events (tracked items) ---
+
+export const trackEnvelope = (id: string) =>
+  jsonFetch<{ status: string; event_id: string }>(`/api/envelopes/${id}/track`, {
+    method: "POST",
+  })
+
+export const listEvents = (status?: string) => {
+  const params = new URLSearchParams()
+  if (status) params.set("status", status)
+  return jsonFetch<TrackedEvent[]>(`/api/events?${params}`)
+}
+
+export const getEvent = (id: string) =>
+  jsonFetch<TrackedEvent>(`/api/events/${id}`)
+
+export const resolveEvent = (id: string) =>
+  jsonFetch<{ status: string; id: string }>(`/api/events/${id}/resolve`, {
+    method: "POST",
+  })
+
+export const markUpdatesSeen = (id: string) =>
+  jsonFetch<{ marked_seen: number }>(`/api/events/${id}/updates/seen`, {
+    method: "PATCH",
+  })
+
+export const analyzeEvent = (id: string) =>
+  jsonFetch<{ status: string; summary_length?: number }>(`/api/events/${id}/analyze`, {
+    method: "POST",
   })
