@@ -9,6 +9,15 @@ rules:
       tools: ["Read", "Grep", "WebFetch"]
       auto_approve: false
 
+  - name: "GitHub releases"
+    match:
+      source: github
+      labels: ["github:release"]
+    action:
+      priority: 1
+      prompt: "prompt_github_release"
+      auto_approve: true
+
   - name: "GitHub issues and PRs (general)"
     match:
       source: github

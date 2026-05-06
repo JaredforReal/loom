@@ -71,6 +71,11 @@ class GitHubAdaptor(BaseAdaptor):
         self._running = False
         self._client: httpx.AsyncClient | None = None
         self._poll_task: Any | None = None
+        self._store: Any | None = None  # Store for tracked item lookups
+
+    def set_store(self, store: Any) -> None:
+        """Inject the state store for tracked item lookups."""
+        self._store = store
 
     # ------------------------------------------------------------------
     # Configuration
@@ -151,7 +156,6 @@ class GitHubAdaptor(BaseAdaptor):
                     await self._poll_source(key, config)
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code == 403:
-                        # Rate limited — check reset time and back off
                         reset = int(exc.response.headers.get("X-RateLimit-Reset", "0"))
                         if reset:
                             wait = max(reset - int(datetime.now(UTC).timestamp()), 10)
@@ -162,10 +166,24 @@ class GitHubAdaptor(BaseAdaptor):
                 except Exception as exc:
                     logger.error("Error polling %s: %s", key, exc)
 
+                # Poll releases if configured
+                if "releases" in config.events and self._running:
+                    try:
+                        await self._poll_releases(key, config)
+                    except Exception as exc:
+                        logger.error("Error polling releases for %s: %s", key, exc)
+
             # Sleep for the shortest configured interval
             min_interval = min(
                 (c.poll_interval for c in self._sources.values()), default=DEFAULT_POLL_INTERVAL
             )
+
+            # Poll comments for tracked items
+            try:
+                await self._poll_tracked_updates()
+            except Exception as exc:
+                logger.error("Error polling tracked updates: %s", exc)
+
             await asyncio.sleep(min_interval)
 
     async def _poll_source(self, key: str, config: GitHubSourceConfig) -> None:
@@ -263,6 +281,162 @@ class GitHubAdaptor(BaseAdaptor):
         # Advance cursor
         self._cursors[key] = latest_updated
 
+    async def _poll_releases(self, key: str, config: GitHubSourceConfig) -> None:
+        """Poll a single repo for new releases."""
+        assert self._client is not None
+
+        resp = await self._client.get(f"/repos/{key}/releases", params={"per_page": 30})
+        if resp.status_code == 304:
+            return
+        resp.raise_for_status()
+
+        releases = resp.json()
+        if not releases:
+            return
+
+        release_cursor_key = f"release_cursor:{key}"
+        last_seen_tag = self._cursors.get(release_cursor_key)
+
+        for release in releases:
+            tag = release.get("tag_name", "")
+            if not tag:
+                continue
+            # Releases come newest-first; stop at cursor
+            if last_seen_tag and tag <= last_seen_tag:
+                break
+
+            envelope = self._normalize_release(release, key)
+            envelope.group = config.group
+
+            if envelope.source_id in self._seen_ids:
+                continue
+            self._seen_ids.add(envelope.source_id)
+
+            await self._emit(envelope)
+            logger.info("New GitHub release: %s", envelope.title[:60])
+
+        if releases:
+            latest_tag = releases[0].get("tag_name", "")
+            if latest_tag:
+                self._cursors[release_cursor_key] = latest_tag
+
+    def _normalize_release(self, raw: dict, repo_full: str) -> Envelope:
+        """Convert a GitHub release API response into an Envelope."""
+        tag = raw.get("tag_name", "")
+        source_id = f"{repo_full}:release:{tag}"
+
+        body_parts = []
+        if raw.get("body"):
+            body_parts.append(raw["body"])
+        if raw.get("draft"):
+            body_parts.append("Draft: True")
+        if raw.get("prerelease"):
+            body_parts.append("Pre-release: True")
+
+        return Envelope(
+            source=self.name,
+            source_id=source_id,
+            title=f"[Release] {raw.get('name') or tag}",
+            body="\n\n".join(body_parts) if body_parts else "",
+            status=EnvelopeStatus.PENDING,
+            priority=1,
+            labels=["github:release"],
+            metadata={
+                "repo": repo_full,
+                "tag_name": tag,
+                "kind": "release",
+                "html_url": raw.get("html_url", ""),
+                "author": (raw.get("author") or {}).get("login", ""),
+                "published_at": raw.get("published_at", ""),
+                "draft": raw.get("draft", False),
+                "prerelease": raw.get("prerelease", False),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Tracked item update fetching
+    # ------------------------------------------------------------------
+
+    async def _poll_tracked_updates(self) -> None:
+        """Fetch new comments for tracked items and append to Events."""
+        if not self._store or not self._client:
+            return
+
+        from loom.state.store import Store
+
+        store: Store = self._store
+        events = await store.list_events(status="active", source="github")
+        if not events:
+            return
+
+        for event in events:
+            try:
+                await self._fetch_new_comments(store, event)
+            except Exception as exc:
+                logger.error("Error fetching comments for %s: %s", event.source_id, exc)
+
+    async def _fetch_new_comments(self, store: Any, event: Any) -> None:
+        """Fetch new comments for a single tracked item."""
+        assert self._client is not None
+
+        repo = event.metadata.get("repo", "")
+        number = event.metadata.get("number", 0)
+        if not repo or not number:
+            return
+
+        url = f"/repos/{repo}/issues/{number}/comments"
+        params: dict[str, Any] = {"per_page": 100, "sort": "created", "direction": "asc"}
+
+        resp = await self._client.get(url, params=params)
+        resp.raise_for_status()
+        comments = resp.json()
+
+        last_comment_id = event.metadata.get("last_comment_id", 0)
+
+        new_updates: list[dict] = []
+        for comment in comments:
+            comment_id = comment.get("id", 0)
+            if comment_id <= last_comment_id:
+                continue
+            user = (comment.get("user") or {}).get("login", "unknown")
+            new_updates.append(
+                {
+                    "id": f"comment:{comment_id}",
+                    "type": "comment",
+                    "author": user,
+                    "body": comment.get("body", ""),
+                    "html_url": comment.get("html_url", ""),
+                    "created_at": comment.get("created_at", ""),
+                    "seen": False,
+                }
+            )
+
+        if new_updates:
+            await store.append_updates(event.source_id, new_updates)
+            latest_id = max(c.get("id", 0) for c in comments) if comments else last_comment_id
+            event.metadata["last_comment_id"] = latest_id
+            await store.update_event_metadata(event.id, event.metadata)
+            logger.info(
+                "Appended %d new comments to event %s",
+                len(new_updates),
+                event.source_id,
+            )
+
+    async def init_comment_cursor(self, repo: str, number: int) -> int:
+        """Fetch the latest comment ID for a newly tracked item."""
+        assert self._client is not None
+        url = f"/repos/{repo}/issues/{number}/comments"
+        params: dict[str, Any] = {"per_page": 1, "sort": "created", "direction": "desc"}
+
+        resp = await self._client.get(url, params=params)
+        if resp.status_code == 404:
+            return 0
+        resp.raise_for_status()
+        comments = resp.json()
+        if comments:
+            return comments[0].get("id", 0)
+        return 0
+
     # ------------------------------------------------------------------
     # Normalize
     # ------------------------------------------------------------------
@@ -289,8 +463,10 @@ class GitHubAdaptor(BaseAdaptor):
         }
         if is_pr:
             labels.append("pr")
+            labels.append("github:new_pr")
         else:
             labels.append("issue")
+            labels.append("github:new_issue")
         state = item.get("state", "")
         if state:
             labels.append(state)

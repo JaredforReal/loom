@@ -16,6 +16,7 @@ import sys
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 
@@ -147,6 +148,7 @@ def _build_adaptors(
     sources: list[dict],
     mailbox: Mailbox,
     config: LoomConfig,
+    store: Any | None = None,
 ) -> list[BaseAdaptor]:
     """Create adaptor instances from config source entries."""
     adaptors: list[BaseAdaptor] = []
@@ -157,6 +159,8 @@ def _build_adaptors(
         token = os.environ.get("GITHUB_TOKEN")
         proxy = _resolve_proxy(config)
         gh = GitHubAdaptor(token=token, proxy=proxy)
+        if store is not None:
+            gh.set_store(store)
         for src in github_sources:
             default_group = f"{src['owner']}/{src['repo']}"
             gh.add_source(
@@ -347,7 +351,7 @@ async def run_daemon(config: LoomConfig | None = None) -> None:
     session_mgr._on_complete = dispatcher.handle_session_complete
 
     # --- Adaptors ---
-    adaptors = _build_adaptors(config.sources, mailbox, config)
+    adaptors = _build_adaptors(config.sources, mailbox, config, store)
 
     # Restore persisted state before starting
     for ad in adaptors:

@@ -15,6 +15,7 @@ class EnvelopeStatus(StrEnum):
     DONE = "done"
     DISMISSED = "dismissed"
     FAILED = "failed"
+    TRACKED = "tracked"  # Envelope graduated to a tracked Event
 
 
 @dataclass

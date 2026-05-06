@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from loom.core.envelope import Envelope, EnvelopeStatus
+from loom.core.event import Event
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,25 @@ class AdaptorStateRow(Base):
     adaptor = Column(String, primary_key=True)
     key = Column(String, primary_key=True)
     value = Column(Text, default="")
+
+
+class EventRow(Base):
+    __tablename__ = "events"
+
+    id = Column(String, primary_key=True)
+    source_id = Column(String, unique=True, index=True)
+    source = Column(String, index=True)
+    title = Column(Text)
+    group_col = Column("group", String, index=True, default="")
+    envelope_id = Column(String)
+    status = Column(String, default="active")
+    agent_session_id = Column(String, default="")
+    agent_summary = Column(Text, default="")
+    labels = Column(Text, default="[]")
+    metadata_ = Column("metadata", Text, default="{}")
+    updates = Column(Text, default="[]")
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
 
 
 def _row_to_envelope(row: EnvelopeRow) -> Envelope:
@@ -87,6 +107,47 @@ def _envelope_to_row(env: Envelope, row: EnvelopeRow | None = None) -> EnvelopeR
     row.proposed_action = (
         json.dumps(env.proposed_action) if env.proposed_action is not None else None
     )
+    return row
+
+
+def _row_to_event(row: EventRow) -> Event:
+    """Convert a database row to an Event dataclass."""
+    return Event(
+        id=row.id,
+        source_id=row.source_id or "",
+        source=row.source or "",
+        title=row.title or "",
+        group=row.group_col or "",
+        envelope_id=row.envelope_id or "",
+        status=row.status or "active",
+        agent_session_id=row.agent_session_id or "",
+        agent_summary=row.agent_summary or "",
+        labels=json.loads(row.labels) if row.labels else [],
+        metadata=json.loads(row.metadata_) if row.metadata_ else {},
+        updates=json.loads(row.updates) if row.updates else [],
+        created_at=row.created_at or datetime.utcnow(),
+        updated_at=row.updated_at or datetime.utcnow(),
+    )
+
+
+def _event_to_row(event: Event, row: EventRow | None = None) -> EventRow:
+    """Convert an Event dataclass to a database row."""
+    if row is None:
+        row = EventRow()
+    row.id = event.id
+    row.source_id = event.source_id
+    row.source = event.source
+    row.title = event.title
+    row.group_col = event.group
+    row.envelope_id = event.envelope_id
+    row.status = event.status
+    row.agent_session_id = event.agent_session_id
+    row.agent_summary = event.agent_summary
+    row.labels = json.dumps(event.labels)
+    row.metadata_ = json.dumps(event.metadata)
+    row.updates = json.dumps(event.updates)
+    row.created_at = event.created_at
+    row.updated_at = event.updated_at
     return row
 
 
@@ -264,3 +325,99 @@ class Store:
         async with self._session() as session:
             row = await session.get(AdaptorStateRow, (adaptor, key))
             return row.value if row else None
+
+    # --- Event CRUD ---
+
+    async def create_event(self, event: Event) -> Event:
+        """Insert a new tracked event."""
+        async with self._session() as session:
+            row = _event_to_row(event)
+            session.add(row)
+            await session.commit()
+            return event
+
+    async def get_event(self, event_id: str) -> Event | None:
+        """Retrieve a single event by ID."""
+        async with self._session() as session:
+            row = await session.get(EventRow, event_id)
+            if row is None:
+                return None
+            return _row_to_event(row)
+
+    async def get_event_by_source_id(self, source_id: str) -> Event | None:
+        """Retrieve an event by its source_id."""
+        async with self._session() as session:
+            stmt = select(EventRow).where(EventRow.source_id == source_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return _row_to_event(row) if row else None
+
+    async def list_events(
+        self,
+        status: str | None = None,
+        source: str | None = None,
+        limit: int = 100,
+    ) -> list[Event]:
+        """List events with optional filters, newest first."""
+        async with self._session() as session:
+            stmt = select(EventRow).order_by(EventRow.updated_at.desc())
+            if status is not None:
+                stmt = stmt.where(EventRow.status == status)
+            if source is not None:
+                stmt = stmt.where(EventRow.source == source)
+            stmt = stmt.limit(limit)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [_row_to_event(r) for r in rows]
+
+    async def resolve_event(self, event_id: str) -> None:
+        """Mark an event as resolved."""
+        async with self._session() as session:
+            row = await session.get(EventRow, event_id)
+            if row is None:
+                return
+            row.status = "resolved"
+            row.updated_at = datetime.utcnow()
+            await session.commit()
+
+    async def append_updates(self, source_id: str, new_updates: list[dict]) -> None:
+        """Append updates to an event and bump updated_at."""
+        async with self._session() as session:
+            stmt = select(EventRow).where(EventRow.source_id == source_id)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                return
+            existing = json.loads(row.updates) if row.updates else []
+            existing.extend(new_updates)
+            row.updates = json.dumps(existing)
+            row.updated_at = datetime.utcnow()
+            await session.commit()
+
+    async def update_event_summary(self, event_id: str, summary: str) -> None:
+        """Update the agent summary for an event."""
+        async with self._session() as session:
+            row = await session.get(EventRow, event_id)
+            if row is None:
+                return
+            row.agent_summary = summary
+            row.updated_at = datetime.utcnow()
+            await session.commit()
+
+    async def update_event_metadata(self, event_id: str, metadata: dict) -> None:
+        """Replace event metadata."""
+        async with self._session() as session:
+            row = await session.get(EventRow, event_id)
+            if row is None:
+                return
+            row.metadata_ = json.dumps(metadata)
+            row.updated_at = datetime.utcnow()
+            await session.commit()
+
+    async def save_event(self, event: Event) -> None:
+        """Upsert an event (insert or update by ID)."""
+        async with self._session() as session:
+            existing = await session.get(EventRow, event.id)
+            row = _event_to_row(event, existing)
+            session.add(row)
+            await session.commit()
