@@ -43,8 +43,15 @@ class GitHubSourceConfig:
     poll_interval: int = DEFAULT_POLL_INTERVAL
     state: str = "all"  # "open", "closed", "all"
     labels_filter: list[str] = field(default_factory=list)
+    include_labels: list[str] = field(default_factory=list)
+    keywords: list[str] = field(default_factory=list)
+    authors: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=lambda: ["issues", "pull_requests"])
     group: str = ""
+
+    def __post_init__(self) -> None:
+        if self.labels_filter and not self.include_labels:
+            self.include_labels = self.labels_filter
 
 
 class GitHubAdaptor(BaseAdaptor):
@@ -177,6 +184,9 @@ class GitHubAdaptor(BaseAdaptor):
             "direction": "asc",
             "per_page": 100,
         }
+        # Server-side label filter when single label (API does AND for multiple)
+        if len(config.include_labels) == 1:
+            params["labels"] = config.include_labels[0]
 
         # Conditional request with ETag
         headers: dict[str, str] = {}
@@ -219,10 +229,22 @@ class GitHubAdaptor(BaseAdaptor):
             if not is_pr and "issues" not in config.events:
                 continue
 
-            # Filter by labels if configured
-            if config.labels_filter:
+            # Filter by labels if configured (client-side OR match)
+            if config.include_labels:
                 item_labels = {lbl["name"] for lbl in item.get("labels", [])}
-                if not any(lbl in item_labels for lbl in config.labels_filter):
+                if not any(lbl in item_labels for lbl in config.include_labels):
+                    continue
+
+            # Filter by keywords (title + body, case-insensitive OR)
+            if config.keywords:
+                text = f"{item.get('title', '')} {item.get('body', '')}".lower()
+                if not any(kw.lower() in text for kw in config.keywords):
+                    continue
+
+            # Filter by authors (case-insensitive OR)
+            if config.authors:
+                login = (item.get("user") or {}).get("login", "")
+                if login.lower() not in {a.lower() for a in config.authors}:
                     continue
 
             await self._emit(envelope)

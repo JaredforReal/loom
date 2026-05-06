@@ -167,6 +167,9 @@ def _build_adaptors(
                     state=src.get("state", "all"),
                     events=src.get("events", ["issues", "pull_requests"]),
                     labels_filter=src.get("labels_filter"),
+                    include_labels=src.get("include_labels") or [],
+                    keywords=src.get("keywords") or [],
+                    authors=src.get("authors") or [],
                     group=src.get("group") or default_group,
                 )
             )
