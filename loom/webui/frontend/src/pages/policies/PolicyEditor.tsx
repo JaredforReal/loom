@@ -20,16 +20,16 @@ export function PolicyEditor({
   readOnly,
   schema,
 }: PolicyEditorProps) {
-  const [mode, setMode] = useState<Mode>("yaml")
+  const [mode, setMode] = useState<Mode>("form")
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/20 px-3 py-1.5">
-        <ModeTab active={mode === "yaml"} onClick={() => setMode("yaml")}>
-          YAML
-        </ModeTab>
         <ModeTab active={mode === "form"} onClick={() => setMode("form")}>
           Form
+        </ModeTab>
+        <ModeTab active={mode === "yaml"} onClick={() => setMode("yaml")}>
+          YAML
         </ModeTab>
       </div>
       <div className="flex-1 overflow-hidden">

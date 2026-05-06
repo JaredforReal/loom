@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react"
+import { HelpCircle, Trash2 } from "lucide-react"
 
 import type {
   PolicyAction,
@@ -154,24 +154,34 @@ export function RuleCard({
             className={inputCls}
           />
         </Field>
-        <Field label="Tools" className="col-span-2">
-          <ChipInput
+        <FieldWithHelp
+          label="Tools"
+          help="Allowed Claude Code tools for this rule's agent session. Leave empty for all."
+          className="col-span-2"
+        >
+          <MultiSelect
             values={rule.action.tools ?? []}
             onChange={(tools) => updateAction({ tools })}
             disabled={readOnly}
-            suggestions={schema?.tools ?? []}
-            placeholder="Read, Grep, Bash"
+            options={schema?.tools ?? []}
           />
-        </Field>
-        <Field label="Skills" className="col-span-2">
+        </FieldWithHelp>
+        <FieldWithHelp
+          label="Skills"
+          help="SDK skill names to inject into the agent session (advanced)."
+          className="col-span-2"
+        >
           <ChipInput
             values={rule.action.skills ?? []}
             onChange={(skills) => updateAction({ skills })}
             disabled={readOnly}
             placeholder="skill-name"
           />
-        </Field>
-        <Field label="Max turns">
+        </FieldWithHelp>
+        <FieldWithHelp
+          label="Max turns"
+          help="Limit the agent session to N conversation turns. Empty = unlimited."
+        >
           <input
             type="number"
             min={1}
@@ -184,7 +194,7 @@ export function RuleCard({
             disabled={readOnly}
             className={inputCls}
           />
-        </Field>
+        </FieldWithHelp>
         <Field label="Working directory (cwd)">
           <input
             type="text"
@@ -195,7 +205,10 @@ export function RuleCard({
             className={inputCls}
           />
         </Field>
-        <Field label="Batch window (only if batched)">
+        <FieldWithHelp
+          label="Batch window"
+          help="Only used when Batch is on. Collect envelopes for this duration before processing (e.g. '6h', '1d')."
+        >
           <input
             type="text"
             value={rule.action.batch_window ?? ""}
@@ -204,8 +217,12 @@ export function RuleCard({
             placeholder="6h, 1d"
             className={inputCls}
           />
-        </Field>
-        <Field label="Toggles" className="col-span-2">
+        </FieldWithHelp>
+        <FieldWithHelp
+          label="Toggles"
+          help="Auto-approve: run agent and execute result without user review. Batch: group envelopes over a time window before processing."
+          className="col-span-2"
+        >
           <div className="flex flex-wrap gap-4">
             <Toggle
               label="auto_approve"
@@ -220,8 +237,12 @@ export function RuleCard({
               disabled={readOnly}
             />
           </div>
-        </Field>
-        <Field label="System prompt" className="col-span-2">
+        </FieldWithHelp>
+        <FieldWithHelp
+          label="System prompt"
+          help="Override the agent's system prompt entirely. Leave empty to use the default."
+          className="col-span-2"
+        >
           <textarea
             value={rule.action.system_prompt ?? ""}
             onChange={(e) => updateAction({ system_prompt: e.target.value || undefined })}
@@ -229,7 +250,7 @@ export function RuleCard({
             rows={3}
             className={cn(inputCls, "min-h-[60px] resize-y")}
           />
-        </Field>
+        </FieldWithHelp>
       </div>
     </div>
   )
@@ -252,6 +273,80 @@ function Field({
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {children}
     </label>
+  )
+}
+
+function FieldWithHelp({
+  label,
+  help,
+  className,
+  children,
+}: {
+  label: string
+  help: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className={cn("flex flex-col gap-1", className)}>
+      <span className="group/label flex items-center gap-1 text-xs font-medium text-muted-foreground">
+        {label}
+        <span className="relative inline-flex">
+          <HelpCircle className="h-3 w-3 cursor-help opacity-40 group-hover/label:opacity-70" />
+          <span className="pointer-events-none invisible absolute bottom-full left-1/2 z-50 mb-1 -translate-x-1/2 max-w-[800px] whitespace-normal rounded bg-muted px-2.5 py-1.5 text-[10px] leading-relaxed text-foreground opacity-0 shadow-lg ring-1 ring-border transition-opacity group-hover/label:visible group-hover/label:opacity-100">
+            {help}
+          </span>
+        </span>
+      </span>
+      {children}
+    </label>
+  )
+}
+
+function MultiSelect({
+  values,
+  onChange,
+  disabled,
+  options,
+}: {
+  values: string[]
+  onChange: (next: string[]) => void
+  disabled?: boolean
+  options: string[]
+}) {
+  const toggle = (opt: string) => {
+    if (disabled) return
+    onChange(
+      values.includes(opt)
+        ? values.filter((v) => v !== opt)
+        : [...values, opt],
+    )
+  }
+  return (
+    <div className={cn("flex flex-wrap gap-1.5", disabled && "opacity-60")}>
+      {options.map((opt) => {
+        const active = values.includes(opt)
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => toggle(opt)}
+            disabled={disabled}
+            className={cn(
+              "rounded-md border px-2 py-1 text-xs font-medium transition-colors",
+              active
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground",
+            )}
+          >
+            {opt}
+          </button>
+        )
+      })}
+      {options.length === 0 && (
+        <span className="text-xs text-muted-foreground">(no options available)</span>
+      )}
+    </div>
   )
 }
 
