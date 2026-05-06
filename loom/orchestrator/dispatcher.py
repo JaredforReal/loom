@@ -109,26 +109,33 @@ class Dispatcher:
 
     async def _try_dispatch(self, envelope: Envelope) -> None:
         """Evaluate envelope against policy and dispatch if matched."""
-        action = self._policy.evaluate(envelope)
+        result = self._policy.evaluate(envelope)
 
         # Fallback: load group's linked policy file if no rule matched
-        if action is None and envelope.group and self._config:
+        if result is None and envelope.group and self._config:
             policy_name = self._config.groups.get(envelope.group)
             if policy_name and self._policy.policy_dir:
-                action = self._policy.load_action_by_name(policy_name, self._policy.policy_dir)
+                result = self._policy.load_action_by_name(policy_name, self._policy.policy_dir)
 
-        if action is None:
+        if result is None:
             logger.info("No matching policy rule for envelope %s — skipping", envelope.id)
             return
+
+        action = result.action
+
+        # Store policy provenance on the envelope
+        envelope.metadata["matched_rule"] = result.rule_name
+        envelope.metadata["matched_policy"] = result.policy_file
+        envelope.metadata["matched_policy_source"] = result.policy_source
 
         if action.priority != envelope.priority:
             envelope.priority = action.priority
 
         logger.info(
-            "Dispatching envelope %s — agent=%s prompt=%s auto_approve=%s",
+            "Dispatching envelope %s — policy=%s rule=%s auto_approve=%s",
             envelope.id,
-            action.agent,
-            action.prompt,
+            result.policy_file,
+            result.rule_name,
             action.auto_approve,
         )
 

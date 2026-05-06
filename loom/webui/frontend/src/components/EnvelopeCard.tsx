@@ -40,9 +40,16 @@ export function EnvelopeCard({ envelope, active, onClick }: EnvelopeCardProps) {
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs text-muted-foreground">
-          {envelope.source_id}
-        </span>
+        <div className="flex items-center gap-1.5 truncate">
+          <span className="truncate text-xs text-muted-foreground">
+            {envelope.source_id}
+          </span>
+          {envelope.group && (
+            <span className="shrink-0 rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">
+              {envelope.group}
+            </span>
+          )}
+        </div>
         <span className="shrink-0 text-xs text-muted-foreground">
           {envelope.received_at ? formatRelativeTime(envelope.received_at) : "—"}
         </span>

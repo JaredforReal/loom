@@ -11,7 +11,7 @@ import yaml
 
 from loom.core.envelope import Envelope
 from loom.orchestrator.dispatcher import _SafeDict
-from loom.orchestrator.policy import PolicyAction, PolicyEngine
+from loom.orchestrator.policy import PolicyAction, PolicyEngine, PolicyResult
 from loom.orchestrator.session import SessionManager
 
 # ---------------------------------------------------------------------------
@@ -138,9 +138,11 @@ class TestPolicyLayering:
 
         engine = PolicyEngine(policy_dir=tmp_path / "empty", bundled_dir=bundled)
         envelope = Envelope(source="github")
-        action = engine.evaluate(envelope)
-        assert action is not None
-        assert action.priority == 1
+        result = engine.evaluate(envelope)
+        assert result is not None
+        assert result.action.priority == 1
+        assert result.policy_file == "default.yaml"
+        assert result.policy_source == "bundled"
 
     def test_user_rules_match_before_bundled(self, tmp_path: Path) -> None:
         bundled = tmp_path / "bundled"
@@ -177,9 +179,11 @@ class TestPolicyLayering:
 
         engine = PolicyEngine(policy_dir=user, bundled_dir=bundled)
         envelope = Envelope(source="github")
-        action = engine.evaluate(envelope)
-        assert action is not None
-        assert action.priority == 3  # User rule wins
+        result = engine.evaluate(envelope)
+        assert result is not None
+        assert result.action.priority == 3  # User rule wins
+        assert result.policy_source == "user"
+        assert result.policy_file == "override.yaml"
 
     def test_new_policy_action_fields(self, tmp_path: Path) -> None:
         policy_dir = tmp_path / "policies"
@@ -210,13 +214,14 @@ class TestPolicyLayering:
 
         engine = PolicyEngine(policy_dir=policy_dir)
         envelope = Envelope(source="github", source_id="vllm-project/vllm#42")
-        action = engine.evaluate(envelope)
-        assert action is not None
-        assert action.skills == ["vllm-expert"]
-        assert action.cwd == "/path/to/vllm"
-        assert action.model == "sonnet"
-        assert action.max_turns == 5
-        assert action.prompt == "github/vllm"
+        result = engine.evaluate(envelope)
+        assert result is not None
+        assert result.action.skills == ["vllm-expert"]
+        assert result.action.cwd == "/path/to/vllm"
+        assert result.action.model == "sonnet"
+        assert result.action.max_turns == 5
+        assert result.action.prompt == "github/vllm"
+        assert result.rule_name == "vllm rule"
 
     def test_loads_actual_bundled_policies(self) -> None:
         bundled_dir = Path(__file__).parent.parent / "loom" / "policies"
@@ -225,8 +230,8 @@ class TestPolicyLayering:
         engine = PolicyEngine(policy_dir=Path("/nonexistent"), bundled_dir=bundled_dir)
         # Should match GitHub envelopes
         envelope = Envelope(source="github")
-        action = engine.evaluate(envelope)
-        assert action is not None
+        result = engine.evaluate(envelope)
+        assert result is not None
 
     def test_empty_dirs_no_error(self, tmp_path: Path) -> None:
         empty = tmp_path / "empty"
@@ -356,7 +361,9 @@ class TestAgentToggle:
         mailbox._store = MagicMock()
 
         action = PolicyAction(prompt="test")
-        policy.evaluate.return_value = action
+        policy.evaluate.return_value = PolicyResult(
+            action=action, rule_name="test", policy_file="test.yaml", policy_source="user"
+        )
         sessions.get_prompt_template.return_value = "test"
         sessions.spawn = AsyncMock()
 

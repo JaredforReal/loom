@@ -122,6 +122,21 @@ export function EnvelopeDetail({ envelopeId }: EnvelopeDetailProps) {
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="uppercase">{envelope.status}</span>
+        {envelope.group && (
+          <>
+            <span className="text-border">·</span>
+            <span>{envelope.group}</span>
+          </>
+        )}
+        {typeof md.matched_policy === "string" && (
+          <>
+            <span className="text-border">·</span>
+            <span className="font-mono text-[10px]">
+              {md.matched_policy}
+              {typeof md.matched_rule === "string" && ` / ${md.matched_rule}`}
+            </span>
+          </>
+        )}
         {user && (
           <>
             <span className="text-border">·</span>

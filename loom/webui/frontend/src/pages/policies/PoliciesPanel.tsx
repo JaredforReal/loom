@@ -7,6 +7,7 @@ import {
 import { Plus, Trash2, FileText, Lock } from "lucide-react"
 import { toast } from "sonner"
 
+import { listGroups } from "@/lib/api"
 import {
   deletePolicy,
   getPolicySchema,
@@ -39,6 +40,25 @@ export function PoliciesPanel() {
     queryFn: listPolicies,
     refetchInterval: 30_000,
   })
+
+  const { data: groups = [] } = useQuery({
+    queryKey: ["groups"],
+    queryFn: listGroups,
+  })
+
+  // Build reverse map: policy stem → group names
+  const policyUsage = useMemo(() => {
+    const map: Record<string, string[]> = {}
+    for (const g of groups) {
+      const policyName = (g as unknown as Record<string, unknown>).policy as string | undefined
+      if (policyName) {
+        const stem = policyName.replace(/\.ya?ml$/, "")
+        if (!map[stem]) map[stem] = []
+        map[stem].push(g.name)
+      }
+    }
+    return map
+  }, [groups])
 
   const { data: schema } = useQuery({
     queryKey: ["policy-schema"],
@@ -140,6 +160,7 @@ export function PoliciesPanel() {
             label="User"
             selectedName={selectedName}
             onSelect={setSelectedName}
+            policyUsage={policyUsage}
           />
           <PolicyList
             policies={policies}
@@ -147,6 +168,7 @@ export function PoliciesPanel() {
             label="Bundled (read-only)"
             selectedName={selectedName}
             onSelect={setSelectedName}
+            policyUsage={policyUsage}
           />
         </div>
       </aside>
@@ -220,12 +242,14 @@ function PolicyList({
   label,
   selectedName,
   onSelect,
+  policyUsage,
 }: {
   policies: PolicySummary[]
   source: "user" | "bundled"
   label: string
   selectedName: string | null
   onSelect: (name: string) => void
+  policyUsage: Record<string, string[]>
 }) {
   const items = policies.filter((p) => p.source === source)
   if (items.length === 0) return null
@@ -234,26 +258,37 @@ function PolicyList({
       <h3 className="px-2 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </h3>
-      {items.map((p) => (
-        <button
-          key={`${p.source}:${p.name}`}
-          type="button"
-          onClick={() => onSelect(p.name)}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-            selectedName === p.name
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-          )}
-        >
-          {source === "bundled" ? (
-            <Lock className="h-3 w-3 opacity-60" />
-          ) : (
-            <FileText className="h-3 w-3 opacity-60" />
-          )}
-          <span className="flex-1 truncate">{p.name}</span>
-        </button>
-      ))}
+      {items.map((p) => {
+        const stem = p.name.replace(/\.ya?ml$/, "")
+        const usedBy = policyUsage[stem]
+        return (
+          <button
+            key={`${p.source}:${p.name}`}
+            type="button"
+            onClick={() => onSelect(p.name)}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+              selectedName === p.name
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+            )}
+          >
+            {source === "bundled" ? (
+              <Lock className="h-3 w-3 opacity-60" />
+            ) : (
+              <FileText className="h-3 w-3 opacity-60" />
+            )}
+            <div className="flex-1 truncate">
+              <span>{p.name}</span>
+              {usedBy && usedBy.length > 0 && (
+                <span className="ml-1.5 text-[10px] text-muted-foreground">
+                  {usedBy.join(", ")}
+                </span>
+              )}
+            </div>
+          </button>
+        )
+      })}
     </div>
   )
 }

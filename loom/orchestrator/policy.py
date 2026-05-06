@@ -31,6 +31,7 @@ Example policy file::
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,18 @@ class PolicyRule:
     name: str = ""
     match: dict = field(default_factory=dict)
     action: PolicyAction = field(default_factory=PolicyAction)
+    file_name: str = ""
+    file_source: str = ""  # "user" or "bundled"
+
+
+@dataclass
+class PolicyResult:
+    """Outcome of policy evaluation — the action plus where it came from."""
+
+    action: PolicyAction
+    rule_name: str = ""
+    policy_file: str = ""
+    policy_source: str = ""
 
 
 class PolicyEngine:
@@ -103,11 +116,11 @@ class PolicyEngine:
         bundled_rules: list[PolicyRule] = []
         if bundled_dir and bundled_dir.exists():
             for path in sorted(bundled_dir.glob("*.yaml")):
-                self._load_file_into(path, bundled_rules)
+                self._load_file_into(path, bundled_rules, file_source="bundled")
 
         user_rules: list[PolicyRule] = []
         for path in sorted(policy_dir.glob("*.yaml")):
-            self._load_file_into(path, user_rules)
+            self._load_file_into(path, user_rules, file_source="user")
 
         # User rules match first
         self._rules = user_rules + bundled_rules
@@ -118,7 +131,9 @@ class PolicyEngine:
             len(bundled_rules),
         )
 
-    def _load_file_into(self, path: Path, target: list[PolicyRule]) -> None:
+    def _load_file_into(
+        self, path: Path, target: list[PolicyRule], *, file_source: str = ""
+    ) -> None:
         with open(path) as f:
             data = yaml.safe_load(f)
         for rule_data in data.get("rules", []):
@@ -142,10 +157,12 @@ class PolicyEngine:
                     name=rule_data.get("name", ""),
                     match=rule_data.get("match", {}),
                     action=action,
+                    file_name=path.name,
+                    file_source=file_source,
                 )
             )
 
-    def load_action_by_name(self, name: str, policy_dir: Path) -> PolicyAction | None:
+    def load_action_by_name(self, name: str, policy_dir: Path) -> PolicyResult | None:
         """Load a flat policy file (action fields only, no rules wrapper) by name."""
         path = policy_dir / f"{name}.yaml"
         if not path.exists():
@@ -154,7 +171,7 @@ class PolicyEngine:
             data = yaml.safe_load(f)
         if not data or not isinstance(data, dict):
             return None
-        return PolicyAction(
+        action = PolicyAction(
             priority=data.get("priority", 1),
             agent=data.get("agent", ""),
             prompt=data.get("prompt", ""),
@@ -168,12 +185,23 @@ class PolicyEngine:
             skills=data.get("skills", []),
             cwd=data.get("cwd", ""),
         )
+        return PolicyResult(
+            action=action,
+            rule_name="(default)",
+            policy_file=f"{name}.yaml",
+            policy_source="user",
+        )
 
-    def evaluate(self, envelope) -> PolicyAction | None:
-        """Return the first matching rule's action, or None."""
+    def evaluate(self, envelope) -> PolicyResult | None:
+        """Return the first matching rule's action with provenance, or None."""
         for rule in self._rules:
             if self._matches(rule, envelope):
-                return rule.action
+                return PolicyResult(
+                    action=rule.action,
+                    rule_name=rule.name,
+                    policy_file=rule.file_name,
+                    policy_source=rule.file_source,
+                )
         return None
 
     def list_rules(self) -> list[dict[str, Any]]:
@@ -190,13 +218,9 @@ class PolicyEngine:
             if not all(lbl in envelope.labels for lbl in match["labels"]):
                 return False
         if "source_id_pattern" in match:
-            import re
-
             if not re.search(match["source_id_pattern"], envelope.source_id):
                 return False
         if "title_pattern" in match:
-            import re
-
             if not re.search(match["title_pattern"], envelope.title, re.IGNORECASE):
                 return False
         return True
