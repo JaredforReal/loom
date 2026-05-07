@@ -8,7 +8,7 @@ interface ColumnProps {
   status: EnvelopeStatus
   envelopes: Envelope[]
   selectedId: string | null
-  onSelect: (id: string) => void
+  onSelect: (id: string | null) => void
 }
 
 const STATUS_TOKEN: Record<EnvelopeStatus, { bg: string; dot: string; label: string }> = {
@@ -66,7 +66,7 @@ export function Column({ title, status, envelopes, selectedId, onSelect }: Colum
                 <EnvelopeCard
                   envelope={e}
                   active={e.id === selectedId}
-                  onClick={() => onSelect(e.id)}
+                  onClick={() => onSelect(e.id === selectedId ? null : e.id)}
                 />
               </li>
             ))}
