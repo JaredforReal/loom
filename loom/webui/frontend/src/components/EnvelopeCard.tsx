@@ -17,6 +17,7 @@ function pickLabelColors(env: Envelope): Record<string, string> {
 
 /** Compact card shown inside a Kanban column. */
 export function EnvelopeCard({ envelope, active, onClick }: EnvelopeCardProps) {
+  const md = envelope.metadata as Record<string, unknown> | undefined
   const colors = pickLabelColors(envelope)
   // Don't render the synthetic state/kind labels the adaptor appended ("pr", "issue", "open", "closed").
   const displayLabels = envelope.labels.filter(
@@ -51,7 +52,7 @@ export function EnvelopeCard({ envelope, active, onClick }: EnvelopeCardProps) {
           )}
         </div>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {envelope.received_at ? formatRelativeTime(envelope.received_at) : "—"}
+          {formatRelativeTime(((md?.created_at as string) || envelope.received_at || "")) || "—"}
         </span>
       </div>
       <div className="mt-1 line-clamp-2 text-sm font-medium leading-snug text-foreground">

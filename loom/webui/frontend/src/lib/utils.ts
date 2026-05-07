@@ -6,7 +6,9 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatRelativeTime(iso: string): string {
+  if (!iso) return ""
   const date = new Date(iso)
+  if (isNaN(date.getTime())) return ""
   const diffMs = Date.now() - date.getTime()
   const diffMin = Math.floor(diffMs / 60000)
   if (diffMin < 1) return "just now"

@@ -33,23 +33,26 @@ export default function App() {
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar
         view={view}
-        onViewChange={setView}
+        onViewChange={(v) => { setSelectedId(null); setView(v) }}
         sourceFilter={sourceFilter}
         groupFilter={groupFilter}
         sourceIdPrefix={sourceIdPrefix}
         onSourceFilter={(src) => {
+          setSelectedId(null)
           setSourceFilter(src)
           setGroupFilter(null)
           setSourceIdPrefix(null)
           setView("inbox")
         }}
         onGroupFilter={(grp) => {
+          setSelectedId(null)
           setGroupFilter(grp)
           setSourceFilter(null)
           setSourceIdPrefix(null)
           setView("inbox")
         }}
         onSourceIdPrefix={(prefix) => {
+          setSelectedId(null)
           setSourceIdPrefix(prefix)
           setSourceFilter(null)
           setGroupFilter(null)
