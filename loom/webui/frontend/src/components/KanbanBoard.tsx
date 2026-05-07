@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import type { Envelope, EnvelopeStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -47,17 +47,15 @@ export function KanbanBoard({
   // Freeze the active column status when a card is first selected so that
   // envelope status changes (via polling) don't cause layout jumps.
   const [frozenStatus, setFrozenStatus] = useState<EnvelopeStatus | null>(null)
-  const prevSelectedId = useRef<string | null>(null)
 
-  if (selectedId !== prevSelectedId.current) {
-    prevSelectedId.current = selectedId
+  useEffect(() => {
     if (selectedId) {
       const env = envelopes.find((e) => e.id === selectedId)
       if (env) setFrozenStatus(env.status)
     } else {
       setFrozenStatus(null)
     }
-  }
+  }, [selectedId, envelopes])
 
   const isOpen = selectedId !== null
   const activeStatus = isOpen ? frozenStatus : null
