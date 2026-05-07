@@ -52,7 +52,7 @@ export function EnvelopeCard({ envelope, active, onClick }: EnvelopeCardProps) {
           )}
         </div>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {formatRelativeTime(((md?.created_at as string) || envelope.received_at) || "") || "—"}
+          {formatRelativeTime(((md?.created_at as string) || envelope.received_at || "")) || "—"}
         </span>
       </div>
       <div className="mt-1 line-clamp-2 text-sm font-medium leading-snug text-foreground">
