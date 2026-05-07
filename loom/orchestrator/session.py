@@ -65,6 +65,7 @@ class Session:
     cli_session_id: str = ""
     cwd: str = ""
     _client: ClaudeSDKClient | None = field(default=None, repr=False)
+    _task: asyncio.Task[None] | None = field(default=None, repr=False)
 
 
 class SessionManager:
@@ -154,6 +155,20 @@ class SessionManager:
             sessions = [s for s in sessions if s.status == status]
         return sessions
 
+    def cancel_queued(self) -> int:
+        """Cancel all QUEUED sessions. Returns count cancelled."""
+        queued = [s for s in self._sessions.values() if s.status == SessionStatus.QUEUED]
+        count = 0
+        for session in queued:
+            if session._task and not session._task.done():
+                session._task.cancel()
+                session.status = SessionStatus.FAILED
+                session.error = "Cancelled (agent disabled)"
+                count += 1
+        if count:
+            logger.info("Cancelled %d queued sessions", count)
+        return count
+
     # ------------------------------------------------------------------
     # Interactive session (multi-turn via ClaudeSDKClient)
     # ------------------------------------------------------------------
@@ -223,7 +238,7 @@ class SessionManager:
                     return
                 await self._run_session(session, task_prompt)
 
-        asyncio.create_task(_guarded_run())
+        session._task = asyncio.create_task(_guarded_run())
         return session
 
     async def _run_session(self, session: Session, prompt: str) -> None:

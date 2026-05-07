@@ -76,6 +76,8 @@ class Dispatcher:
             logger.info("Agent processing %s", state)
             if enabled:
                 self._start_drain()
+            else:
+                self._sessions.cancel_queued()
 
     async def start(self) -> None:
         """Subscribe to event bus."""
