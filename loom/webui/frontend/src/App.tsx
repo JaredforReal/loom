@@ -8,8 +8,9 @@ import { Sidebar } from "@/components/Sidebar"
 import { KanbanBoard } from "@/components/KanbanBoard"
 import { StatusBar } from "@/components/StatusBar"
 import { SettingsPage } from "@/pages/SettingsPage"
+import { TrackedPanel } from "@/pages/tracked/TrackedPanel"
 
-export type View = "inbox" | "policies" | "prompts" | "config"
+export type View = "inbox" | "policies" | "prompts" | "config" | "tracked"
 
 export default function App() {
   const [view, setView] = useState<View>("inbox")
@@ -68,6 +69,8 @@ export default function App() {
               onSelect={setSelectedId}
               onCloseDetail={() => setSelectedId(null)}
             />
+          ) : view === "tracked" ? (
+            <TrackedPanel />
           ) : (
             <SettingsPage view={view} />
           )}

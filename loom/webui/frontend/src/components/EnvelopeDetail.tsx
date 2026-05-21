@@ -93,8 +93,11 @@ export function EnvelopeDetail({ envelopeId }: EnvelopeDetailProps) {
   const envelope = data as Envelope
   const colors = pickLabelColors(envelope)
   const displayLabels = envelope.labels.filter(
-    (l) => !["pr", "issue", "open", "closed", "merged"].includes(l)
+    (l) =>
+      !["pr", "issue", "open", "closed", "merged"].includes(l) &&
+      !l.startsWith("github:")
   )
+  const eventType = envelope.labels.find((l) => l.startsWith("github:"))
   const md = envelope.metadata as Record<string, unknown>
   const assignees = Array.isArray(md.assignees) ? (md.assignees as string[]) : []
   const user = typeof md.user === "string" ? md.user : null
@@ -107,6 +110,25 @@ export function EnvelopeDetail({ envelopeId }: EnvelopeDetailProps) {
           <span className="uppercase">{envelope.source}</span>
           <span>·</span>
           <span>{envelope.source_id}</span>
+          {eventType && (
+            <span
+              className={cn(
+                "rounded px-1 py-px text-[10px] font-medium",
+                eventType === "github:release" && "bg-emerald-500/15 text-emerald-600",
+                eventType === "github:update" && "bg-amber-500/15 text-amber-600",
+                eventType !== "github:release" &&
+                  eventType !== "github:update" &&
+                  "bg-blue-500/15 text-blue-600",
+              )}
+            >
+              {eventType.replace("github:", "")}
+            </span>
+          )}
+          {envelope.status === "tracked" && (
+            <span className="rounded bg-violet-500/15 px-1 py-px text-[10px] font-medium text-violet-600">
+              tracked
+            </span>
+          )}
         </div>
         <h1 className="pr-8 text-base font-semibold leading-snug">
           {envelope.title || "(no title)"}

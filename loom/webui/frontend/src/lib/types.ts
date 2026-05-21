@@ -5,6 +5,7 @@ export type EnvelopeStatus =
   | "done"
   | "dismissed"
   | "failed"
+  | "tracked"
 
 export interface AgentLogEntry {
   step?: string
@@ -137,4 +138,32 @@ export interface ConfigSaveResponse {
   saved: boolean
   changed: string[]
   restart_required: string[]
+}
+
+export interface EventUpdate {
+  id: string
+  type: string
+  author: string
+  body: string
+  html_url: string
+  created_at: string
+  seen: boolean
+}
+
+export interface TrackedEvent {
+  id: string
+  source_id: string
+  source: string
+  title: string
+  group: string
+  envelope_id: string
+  status: "active" | "resolved"
+  agent_session_id: string
+  agent_summary: string
+  labels: string[]
+  metadata: Record<string, unknown>
+  updates: EventUpdate[]
+  created_at: string | null
+  updated_at: string | null
+  new_updates: number
 }

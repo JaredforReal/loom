@@ -18,10 +18,13 @@ function pickLabelColors(env: Envelope): Record<string, string> {
 /** Compact card shown inside a Kanban column. */
 export function EnvelopeCard({ envelope, active, onClick }: EnvelopeCardProps) {
   const colors = pickLabelColors(envelope)
-  // Don't render the synthetic state/kind labels the adaptor appended ("pr", "issue", "open", "closed").
+  // Don't render the synthetic state/kind/event-type labels.
   const displayLabels = envelope.labels.filter(
-    (l) => !["pr", "issue", "open", "closed", "merged"].includes(l)
+    (l) =>
+      !["pr", "issue", "open", "closed", "merged"].includes(l) &&
+      !l.startsWith("github:")
   )
+  const eventType = envelope.labels.find((l) => l.startsWith("github:"))
   const highPriority = envelope.priority >= 2
   const muted =
     envelope.status === "dismissed" ||
@@ -44,6 +47,20 @@ export function EnvelopeCard({ envelope, active, onClick }: EnvelopeCardProps) {
           <span className="truncate text-xs text-muted-foreground">
             {envelope.source_id}
           </span>
+          {eventType && (
+            <span
+              className={cn(
+                "shrink-0 rounded px-1 py-px text-[10px] font-medium",
+                eventType === "github:release" && "bg-emerald-500/15 text-emerald-600",
+                eventType === "github:update" && "bg-amber-500/15 text-amber-600",
+                eventType !== "github:release" &&
+                  eventType !== "github:update" &&
+                  "bg-blue-500/15 text-blue-600",
+              )}
+            >
+              {eventType.replace("github:", "")}
+            </span>
+          )}
           {envelope.group && (
             <span className="shrink-0 rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">
               {envelope.group}

@@ -30,6 +30,7 @@ from loom.config import (
     load_config,
 )
 from loom.core.envelope import EnvelopeStatus
+from loom.core.event import Event
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,14 @@ def _envelope_to_dict(e) -> dict:
     d = asdict(e)
     d["received_at"] = e.received_at.isoformat() if e.received_at else None
     d["status"] = str(e.status)
+    return d
+
+
+def _event_to_dict(e: Event) -> dict:
+    d = asdict(e)
+    d["created_at"] = e.created_at.isoformat() if e.created_at else None
+    d["updated_at"] = e.updated_at.isoformat() if e.updated_at else None
+    d["new_updates"] = sum(1 for u in e.updates if not u.get("seen", False))
     return d
 
 
@@ -227,6 +236,145 @@ async def get_envelope_session(envelope_id: str):
         if sid:
             return {"cli_session_id": sid, "cwd": md.get("session_cwd")}
     return None
+
+
+# --- Events (tracked items) ---
+
+
+@app.post("/api/envelopes/{envelope_id}/track")
+async def track_envelope(envelope_id: str):
+    """Track a GitHub envelope — creates an Event and marks the envelope TRACKED."""
+    ctx = _ctx()
+    envelope = await ctx.store.get_envelope(envelope_id)
+    if envelope is None:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    if envelope.source != "github":
+        return JSONResponse(
+            status_code=400, content={"error": "tracking only supported for GitHub items"}
+        )
+    if envelope.metadata.get("parent_source_id"):
+        return JSONResponse(
+            status_code=400, content={"error": "cannot track an update — track the parent item"}
+        )
+
+    # Check if already tracked
+    existing = await ctx.store.get_event_by_source_id(envelope.source_id)
+    if existing is not None:
+        return {"status": "already_tracked", "event_id": existing.id}
+
+    # Create Event from envelope
+    from datetime import datetime
+
+    from loom.core.event import Event
+
+    event = Event(
+        source_id=envelope.source_id,
+        source=envelope.source,
+        title=envelope.title,
+        group=envelope.group,
+        envelope_id=envelope.id,
+        status="active",
+        labels=list(envelope.labels),
+        metadata=dict(envelope.metadata),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+
+    # Initialize comment cursor via GitHub adaptor (set last_comment_id to latest)
+    for ad in ctx.adaptors:
+        if ad.name == "github" and ad.is_running:
+            repo = envelope.metadata.get("repo", "")
+            number = envelope.metadata.get("number", 0)
+            if repo and number:
+                try:
+                    latest_id = await ad.init_comment_cursor(repo, number)
+                    event.metadata["last_comment_id"] = latest_id
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to init comment cursor for %s: %s", envelope.source_id, exc
+                    )
+            break
+
+    await ctx.store.create_event(event)
+    await ctx.mailbox.update_status(envelope_id, EnvelopeStatus.TRACKED)
+    return {"status": "tracked", "event_id": event.id}
+
+
+@app.get("/api/events")
+async def list_events(status: str | None = None, source: str | None = None):
+    ctx = _ctx()
+    events = await ctx.store.list_events(status=status, source=source)
+    return [_event_to_dict(e) for e in events]
+
+
+@app.get("/api/events/{event_id}")
+async def get_event(event_id: str):
+    ctx = _ctx()
+    event = await ctx.store.get_event(event_id)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    return _event_to_dict(event)
+
+
+@app.post("/api/events/{event_id}/resolve")
+async def resolve_event(event_id: str):
+    ctx = _ctx()
+    event = await ctx.store.get_event(event_id)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    await ctx.store.resolve_event(event_id)
+    return {"status": "resolved", "id": event_id}
+
+
+@app.patch("/api/events/{event_id}/updates/seen")
+async def mark_updates_seen(event_id: str):
+    ctx = _ctx()
+    event = await ctx.store.get_event(event_id)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    for update in event.updates:
+        update["seen"] = True
+    await ctx.store.save_event(event)
+    return {"marked_seen": len(event.updates)}
+
+
+@app.post("/api/events/{event_id}/analyze")
+async def analyze_event(event_id: str):
+    """Trigger agent re-analysis on a tracked event (manual)."""
+    ctx = _ctx()
+    event = await ctx.store.get_event(event_id)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    if event.status != "active":
+        return JSONResponse(status_code=400, content={"error": "event is not active"})
+
+    # Build context from event + updates
+    update_parts = []
+    for u in event.updates:
+        update_parts.append(
+            f"[{u.get('created_at', '')}] {u.get('author', 'unknown')}:\n{u.get('body', '')}"
+        )
+    context = f"## Item: {event.title}\n\nSource: {event.source_id}\n\n"
+    if event.metadata.get("html_url"):
+        context += f"URL: {event.metadata['html_url']}\n\n"
+    if update_parts:
+        context += f"## Recent Updates ({len(update_parts)} new)\n\n"
+        context += "\n---\n".join(update_parts)
+
+    # Use a fire-and-forget query_once for the analysis
+    try:
+        session = await ctx.session_mgr.query_once(
+            prompt=f"Analyze the following tracked GitHub item and its updates. \
+            Provide a concise summary of what's happening and whether action is needed.\n{context}",
+            envelope_id=event.envelope_id,
+        )
+        if session and session.result:
+            await ctx.store.update_event_summary(event_id, session.result)
+            return {"status": "analyzed", "summary_length": len(session.result)}
+        return {"status": "no_result"}
+    except Exception as exc:
+        logger.error("Error analyzing event %s: %s", event_id, exc)
+        return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 # --- Sources ---
